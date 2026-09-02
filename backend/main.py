@@ -83,6 +83,11 @@ def api_root():
     }
 
 
+@app.get("/healthz", tags=["System"])
+def healthz():
+    return {"status": "healthy", "service": "POLAR-X"}
+
+
 @app.get("/api/dashboard", response_model=schemas.DashboardDataOut, tags=["Dashboard"])
 def get_dashboard_data(db: Session = Depends(get_db)):
     """
@@ -105,8 +110,8 @@ if os.path.isdir(_DIST_DIR):
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str = ""):
         """Serve the React SPA for all non-API routes (enables client-side routing)."""
-        # Don't catch /api/* or /docs or /redoc
-        if full_path.startswith("api/") or full_path in ("docs", "redoc", "openapi.json"):
+        # Don't catch /api/* or /docs or /redoc or /healthz
+        if full_path.startswith("api/") or full_path in ("docs", "redoc", "openapi.json", "healthz"):
             from fastapi import HTTPException as _HTTPException
             raise _HTTPException(status_code=404, detail="Not found")
         if full_path:

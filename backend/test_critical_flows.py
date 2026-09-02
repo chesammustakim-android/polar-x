@@ -49,6 +49,12 @@ def http_req(path, method="GET", body=None, headers=None):
 
 TOKEN = None
 
+def step_0_healthz():
+    status, data = http_req("/healthz")
+    assert status == 200, f"Expected 200 from /healthz, got {status}"
+    assert data.get("status") == "healthy", f"Expected status healthy, got {data}"
+    assert data.get("service") == "POLAR-X"
+
 def step_1_login():
     global TOKEN
     status, data = http_req("/api/auth/login", method="POST", body={
@@ -148,6 +154,7 @@ def main():
     print("===================================================================")
     print("POLAR-X TASK 12: CRITICAL PRODUCTION FLOW INTEGRATION TEST")
     print("===================================================================")
+    run_step("0. Health Check (GET /healthz)", step_0_healthz)
     run_step("1. Login (POST /api/auth/login)", step_1_login)
     run_step("2. Dashboard (GET /api/dashboard)", step_2_dashboard)
     run_step("3. Expeditions (GET /api/expeditions)", step_3_expeditions)
