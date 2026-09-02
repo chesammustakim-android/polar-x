@@ -1,0 +1,858 @@
+/* ==========================================================================
+   POLAR-X — Dashboard & Command Center CSS
+   Layout grids, metric cards, polar map display, telemetry panels
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. DASHBOARD HEADER & QUICK STATS GRID
+   -------------------------------------------------------------------------- */
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.mission-control-banner {
+  background: linear-gradient(135deg, rgba(16, 26, 48, 0.95), rgba(10, 15, 29, 0.98));
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.mission-control-banner::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: radial-gradient(circle at 100% 50%, rgba(56, 189, 248, 0.12), transparent 70%);
+  pointer-events: none;
+}
+
+.banner-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.banner-pulse-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid var(--cyan-400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan-300);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
+}
+
+.banner-title-group h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.4px;
+}
+
+.banner-title-group p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.banner-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  z-index: 2;
+}
+
+.quick-tag {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan-300);
+}
+
+/* Stat Cards Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), var(--ice-glow);
+  background: var(--bg-card-hover);
+}
+
+.stat-card.alert-card-danger {
+  border-color: var(--hazard-red-border);
+  background: linear-gradient(145deg, rgba(239, 68, 68, 0.08), rgba(16, 26, 48, 0.9));
+}
+
+.stat-card.alert-card-danger:hover {
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), var(--hazard-red-glow);
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stat-card-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.stat-icon-wrapper {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--cyan-400);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.stat-icon-wrapper.danger {
+  background: var(--hazard-red-bg);
+  color: var(--hazard-red);
+  border-color: var(--hazard-red-border);
+}
+
+.stat-icon-wrapper.warning {
+  background: var(--hazard-amber-bg);
+  color: var(--hazard-amber);
+  border-color: var(--hazard-amber-border);
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  font-family: var(--font-mono);
+}
+
+.stat-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 8px;
+}
+
+.stat-trend {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-trend.good {
+  color: var(--hazard-green);
+}
+
+.stat-trend.warning {
+  color: var(--hazard-amber);
+}
+
+.stat-trend.critical {
+  color: var(--hazard-red);
+}
+
+/* --------------------------------------------------------------------------
+   2. MAIN DASHBOARD SPLIT GRIDS
+   -------------------------------------------------------------------------- */
+.dashboard-main-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr;
+  gap: 20px;
+}
+
+.dashboard-secondary-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 20px;
+}
+
+.command-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.panel-header {
+  padding: 16px 20px;
+  background: rgba(10, 15, 29, 0.7);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel-title-icon {
+  color: var(--cyan-400);
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.3px;
+}
+
+.panel-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.panel-body {
+  padding: 20px;
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------------
+   3. EXPEDITION OVERVIEW COMPONENT
+   -------------------------------------------------------------------------- */
+.expedition-hero-card {
+  background: linear-gradient(135deg, rgba(19, 30, 54, 0.9), rgba(12, 19, 36, 0.95));
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.expedition-hero-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: var(--cyan-400);
+  box-shadow: 0 0 12px var(--cyan-400);
+}
+
+.exp-top-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.exp-title-block h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.exp-subtitle {
+  font-size: 12px;
+  color: var(--cyan-300);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.exp-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  background: rgba(8, 13, 26, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+}
+
+.exp-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.exp-metric-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.exp-metric-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+
+.readiness-bar-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.readiness-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--cyan-500), var(--cyan-300));
+  box-shadow: 0 0 10px var(--cyan-400);
+  transition: width 0.6s ease;
+}
+
+.progress-fill.warning {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  box-shadow: 0 0 10px #f59e0b;
+}
+
+.progress-fill.danger {
+  background: linear-gradient(90deg, #dc2626, #ef4444);
+  box-shadow: 0 0 10px #ef4444;
+}
+
+.exp-objectives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exp-obj-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.obj-bullet {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan-400);
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   4. POLAR MAP PLACEHOLDER / CANVAS
+   -------------------------------------------------------------------------- */
+.polar-map-container {
+  background: radial-gradient(circle at center, #0c162d 0%, #060a14 100%);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  min-height: 380px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.polar-grid-canvas {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+}
+
+/* Map Header Controls */
+.map-overlay-controls {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.map-control-group {
+  pointer-events: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.map-chip {
+  background: rgba(10, 15, 29, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--cyan-300);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+}
+
+.map-pin-marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 5;
+  transition: transform 0.2s ease;
+}
+
+.map-pin-marker:hover {
+  transform: translate(-50%, -50%) scale(1.15);
+  z-index: 20;
+}
+
+.pin-pulse-ring {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  top: -6px;
+  left: -6px;
+  border-radius: 50%;
+  border: 1.5px solid var(--cyan-400);
+  animation: beaconPing 2.5s infinite;
+  pointer-events: none;
+}
+
+.pin-pulse-ring.danger {
+  border-color: var(--hazard-red);
+}
+
+.pin-core {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--cyan-400);
+  border: 2px solid #fff;
+  box-shadow: 0 0 10px var(--cyan-400);
+}
+
+.pin-core.danger {
+  background: var(--hazard-red);
+  box-shadow: 0 0 12px var(--hazard-red);
+}
+
+.pin-tooltip {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 13, 26, 0.95);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: #fff;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+
+.map-footer-telemetry {
+  position: absolute;
+  bottom: 12px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: rgba(6, 10, 18, 0.85);
+  padding: 6px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  backdrop-filter: blur(6px);
+  z-index: 10;
+}
+
+/* --------------------------------------------------------------------------
+   5. EMERGENCY ALERT PANEL
+   -------------------------------------------------------------------------- */
+.alert-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.emergency-item {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+}
+
+.emergency-item.critical {
+  border-color: var(--hazard-red-border);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(15, 23, 42, 0.9));
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+}
+
+.emergency-item.warning {
+  border-color: var(--hazard-amber-border);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(15, 23, 42, 0.9));
+}
+
+.emergency-item.info {
+  border-color: var(--hazard-blue-border);
+}
+
+.emergency-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.emergency-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.emergency-timestamp {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.emergency-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.emergency-action-bar {
+  background: rgba(8, 13, 26, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: var(--cyan-200);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* --------------------------------------------------------------------------
+   6. CARGO MOVEMENT & ASSET TABLES
+   -------------------------------------------------------------------------- */
+.polar-table-wrapper {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: rgba(10, 15, 29, 0.6);
+}
+
+.polar-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.polar-table th {
+  background: rgba(15, 23, 42, 0.95);
+  padding: 12px 14px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.polar-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.06);
+  color: var(--text-secondary);
+}
+
+.polar-table tr:hover td {
+  background: rgba(56, 189, 248, 0.04);
+  color: var(--text-primary);
+}
+
+.cargo-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--cyan-300);
+}
+
+/* --------------------------------------------------------------------------
+   7. INVENTORY GAUGES & METERS
+   -------------------------------------------------------------------------- */
+.inventory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.inventory-row {
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inventory-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inv-name {
+  font-weight: 600;
+  color: #fff;
+  font-size: 13px;
+}
+
+.inv-amount {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--cyan-300);
+}
+
+.inv-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+/* --------------------------------------------------------------------------
+   8. PERSONNEL STATUS
+   -------------------------------------------------------------------------- */
+.personnel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.personnel-card {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: all var(--transition-fast);
+}
+
+.personnel-card:hover {
+  background: rgba(22, 36, 66, 0.8);
+  border-color: var(--border-medium);
+}
+
+.personnel-card.alert-active {
+  border-color: var(--hazard-red-border);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.personnel-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.personnel-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid var(--cyan-400);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--cyan-300);
+}
+
+.personnel-avatar.danger {
+  background: var(--hazard-red-bg);
+  border-color: var(--hazard-red);
+  color: var(--hazard-red);
+}
+
+.personnel-details h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.personnel-details p {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vitals-pill {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--cyan-400);
+  background: rgba(8, 13, 26, 0.8);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+}
+
+/* --------------------------------------------------------------------------
+   9. COMING SOON / PLACEHOLDER MODULE PAGES
+   -------------------------------------------------------------------------- */
+.placeholder-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.placeholder-hero {
+  background: linear-gradient(135deg, rgba(16, 26, 48, 0.9), rgba(8, 13, 26, 0.95));
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-xl);
+  padding: 36px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+}
+
+.placeholder-info h2 {
+  font-size: 24px;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.placeholder-info p {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  max-width: 600px;
+  line-height: 1.6;
+}
+
+.module-meta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid var(--cyan-400);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--cyan-300);
+  margin-bottom: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   10. RESPONSIVE BREAKPOINTS
+   -------------------------------------------------------------------------- */
+@media (max-width: 1200px) {
+  .dashboard-main-grid,
+  .dashboard-secondary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 16px;
+  }
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .exp-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .header-search-bar {
+    display: none;
+  }
+}

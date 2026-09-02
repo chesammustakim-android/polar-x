@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  polar-x:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polar-x-app
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - CORS_ORIGINS=*
+      - DATABASE_URL=sqlite:///./backend/polar_x.db
+    volumes:
+      - polar_data:/app/backend
+    restart: unless-stopped
+
+volumes:
+  polar_data:
