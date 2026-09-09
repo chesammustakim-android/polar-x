@@ -286,23 +286,23 @@ export default function App() {
             <div className="exp-metrics-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
               <div className="exp-metric-item">
                 <span className="exp-metric-label">Base Station</span>
-                <span className="exp-metric-val" style={{ fontSize: '13px' }}>{selectedPerson.station}</span>
+                <span className="exp-metric-val" style={{ fontSize: '13px' }}>{selectedPerson.station || selectedPerson.current_location || '—'}</span>
               </div>
               <div className="exp-metric-item">
                 <span className="exp-metric-label">Heart Rate</span>
-                <span className="exp-metric-val">{selectedPerson.vitals.hr}</span>
+                <span className="exp-metric-val">{selectedPerson.vitals?.hr || '—'}</span>
               </div>
               <div className="exp-metric-item">
                 <span className="exp-metric-label">Oxygen Saturation</span>
-                <span className="exp-metric-val">{selectedPerson.vitals.spo2}</span>
+                <span className="exp-metric-val">{selectedPerson.vitals?.spo2 || '—'}</span>
               </div>
               <div className="exp-metric-item">
                 <span className="exp-metric-label">Core Body Temp</span>
-                <span className="exp-metric-val">{selectedPerson.vitals.temp}</span>
+                <span className="exp-metric-val">{selectedPerson.vitals?.temp || '—'}</span>
               </div>
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              <strong>Current Activity: </strong> {selectedPerson.currentActivity}
+              <strong>Current Activity: </strong> {selectedPerson.currentActivity || selectedPerson.current_activity || '—'}
             </div>
           </div>
         </QuickModal>
