@@ -637,7 +637,7 @@ function AddPersonnelModal({ expeditions, onClose, onSuccess }) {
 // ============================================================
 // MAIN PAGE COMPONENT
 // ============================================================
-export default function PersonnelPage() {
+export default function PersonnelPage({ initialExpeditionId }) {
   const [personnel, setPersonnel]     = useState([]);
   const [summary, setSummary]         = useState(null);
   const [expeditions, setExpeditions] = useState([]);
@@ -647,7 +647,9 @@ export default function PersonnelPage() {
   const [search, setSearch]             = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterRole, setFilterRole]     = useState('ALL');
-  const [filterExp, setFilterExp]       = useState('ALL');
+  const [filterExp, setFilterExp]       = useState(
+    initialExpeditionId ? String(initialExpeditionId) : 'ALL'
+  );
 
   // Active filter card
   const [activeCard, setActiveCard] = useState(null);

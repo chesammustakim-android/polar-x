@@ -32,6 +32,8 @@ export default function App() {
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [selectedCargo, setSelectedCargo] = useState(null);
   const [selectedPerson, setSelectedPerson] = useState(null);
+  // Expedition-scoped navigation filter (set when jumping from Expeditions page)
+  const [expeditionNavFilter, setExpeditionNavFilter] = useState(null);
 
   useEffect(() => {
     // Check existing stored authentication session
@@ -99,13 +101,32 @@ export default function App() {
           />
         );
       case 'expeditions':
-        return <ExpeditionsPage onSelectExpedition={(exp) => console.log(exp)} />;
+        return (
+          <ExpeditionsPage
+            onNavigate={(tab, opts) => {
+              setExpeditionNavFilter(opts || null);
+              setActiveTab(tab);
+            }}
+          />
+        );
       case 'cargo':
-        return <CargoAssetsPage onSelectCargo={(cargo) => setSelectedCargo(cargo)} />;
+        return (
+          <CargoAssetsPage
+            key={expeditionNavFilter?.expeditionId ?? 'cargo'}
+            onSelectCargo={(cargo) => setSelectedCargo(cargo)}
+            initialExpeditionId={expeditionNavFilter?.expeditionId || null}
+          />
+        );
       case 'inventory':
         return <InventoryPage />;
       case 'personnel':
-        return <PersonnelPage onSelectPersonnel={(person) => setSelectedPerson(person)} />;
+        return (
+          <PersonnelPage
+            key={expeditionNavFilter?.expeditionId ?? 'personnel'}
+            onSelectPersonnel={(person) => setSelectedPerson(person)}
+            initialExpeditionId={expeditionNavFilter?.expeditionId || null}
+          />
+        );
       case 'map':
         return (
           <MapTrackingPage 
@@ -131,7 +152,7 @@ export default function App() {
       {/* Sidebar Navigation */}
       <Sidebar 
         activeTab={activeTab} 
-        onSelectTab={setActiveTab}
+        onSelectTab={(tab) => { setExpeditionNavFilter(null); setActiveTab(tab); }}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         currentUser={currentUser}

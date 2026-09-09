@@ -659,13 +659,14 @@ function AddCargoModal({ onClose, onCreated }) {
 }
 
 // ─── Main: CargoAssetsPage ────────────────────────────────────────────────────
-export default function CargoAssetsPage() {
+export default function CargoAssetsPage({ initialExpeditionId }) {
   const [cargoList, setCargoList]       = useState([]);
   const [stats, setStats]               = useState(null);
   const [loading, setLoading]           = useState(true);
   const [search, setSearch]             = useState('');
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterPriority, setFilterPriority] = useState('ALL');
+  const [filterExpId, setFilterExpId]   = useState(initialExpeditionId || null);
   const [selectedCargoId, setSelectedCargoId] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeStatFilter, setActiveStatFilter] = useState(null);
@@ -678,9 +679,10 @@ export default function CargoAssetsPage() {
     try {
       const [list, statData] = await Promise.all([
         api.getCargo({
-          status:   filterStatus   !== 'ALL' ? filterStatus   : undefined,
-          priority: filterPriority !== 'ALL' ? filterPriority : undefined,
-          search:   search || undefined,
+          status:        filterStatus   !== 'ALL' ? filterStatus   : undefined,
+          priority:      filterPriority !== 'ALL' ? filterPriority : undefined,
+          search:        search || undefined,
+          expedition_id: filterExpId || undefined,
         }),
         api.getCargoStats(),
       ]);
@@ -691,7 +693,7 @@ export default function CargoAssetsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, filterPriority, search]);
+  }, [filterStatus, filterPriority, search, filterExpId]);
 
   useEffect(() => {
     const t = setTimeout(loadCargo, 350);
@@ -756,6 +758,23 @@ export default function CargoAssetsPage() {
           </button>
         </div>
       </div>
+
+      {/* ─── Expedition Filter Banner ─── */}
+      {filterExpId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', background: 'rgba(56,189,248,0.08)', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '8px', marginBottom: '4px' }}>
+          <Box size={14} style={{ color: 'var(--cyan-400)', flexShrink: 0 }} />
+          <span style={{ fontSize: '12px', color: 'var(--cyan-300)', fontFamily: 'var(--font-mono)' }}>
+            Showing cargo for Expedition ID: <strong style={{ color: '#fff' }}>EXP-{filterExpId}</strong>
+          </span>
+          <button
+            className="btn-secondary"
+            style={{ marginLeft: 'auto', fontSize: '11px', padding: '3px 10px' }}
+            onClick={() => setFilterExpId(null)}
+          >
+            Clear Filter
+          </button>
+        </div>
+      )}
 
       {/* ─── Summary Stat Cards ─── */}
       <div className="cargo-stats-grid">
