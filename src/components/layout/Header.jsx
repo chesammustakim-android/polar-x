@@ -11,12 +11,16 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { SYSTEM_META, EMERGENCY_ALERTS } from '../../data/mockData';
+import { api } from '../../services/api';
+import StatusBadge from '../common/StatusBadge';
 
-export default function Header({ activeTab, onOpenAlertModal, currentUser, onLogout }) {
+export default function Header({ activeTab, onOpenAlertModal, currentUser, onLogout, refreshTrigger }) {
   const [utcTime, setUtcTime] = useState('');
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [alerts, setAlerts] = useState([]);
+  const [isLoadingAlerts, setIsLoadingAlerts] = useState(false);
 
   const userName = currentUser?.full_name || SYSTEM_META.adminUser.name;
   const userRole = (currentUser?.role || SYSTEM_META.adminUser.role).replace('_', ' ');
@@ -44,6 +48,27 @@ export default function Header({ activeTab, onOpenAlertModal, currentUser, onLog
     const interval = setInterval(updateClock, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const loadAlerts = async () => {
+    try {
+      setIsLoadingAlerts(true);
+      const data = await api.getAlerts();
+      if (Array.isArray(data) && data.length > 0) {
+        setAlerts(data);
+      } else {
+        setAlerts(EMERGENCY_ALERTS);
+      }
+    } catch (err) {
+      console.warn('[POLAR-X Header] Failed to fetch alerts:', err);
+      setAlerts(EMERGENCY_ALERTS);
+    } finally {
+      setIsLoadingAlerts(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAlerts();
+  }, [activeTab, refreshTrigger]);
 
   const getPageTitle = () => {
     switch (activeTab) {
@@ -104,15 +129,19 @@ export default function Header({ activeTab, onOpenAlertModal, currentUser, onLog
         {/* Notifications Button */}
         <div style={{ position: 'relative' }}>
           <button 
-            className="icon-btn" 
+            className="action-btn" 
             onClick={() => {
-              setIsNotifOpen(!isNotifOpen);
+              const next = !isNotifOpen;
+              setIsNotifOpen(next);
+              if (next) loadAlerts();
               if (isProfileOpen) setIsProfileOpen(false);
             }}
             title="Emergency Alerts & Notifications"
           >
             <Bell size={18} />
-            <span className="btn-ping-badge"></span>
+            {alerts.some(a => (a.severity || '').toUpperCase() === 'CRITICAL' && (a.status || '').toUpperCase() !== 'RESOLVED') && (
+              <span className="btn-ping-badge"></span>
+            )}
           </button>
 
           {/* Notifications Dropdown */}
@@ -122,11 +151,12 @@ export default function Header({ activeTab, onOpenAlertModal, currentUser, onLog
                 position: 'absolute',
                 top: '70px',
                 right: '0',
-                width: '320px',
+                width: '360px',
+                maxHeight: '480px',
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border-strong)',
                 borderRadius: 'var(--radius-lg)',
-                boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+                boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
                 zIndex: 60,
                 padding: '14px',
                 display: 'flex',
@@ -136,32 +166,106 @@ export default function Header({ activeTab, onOpenAlertModal, currentUser, onLog
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '8px' }}>
                 <span style={{ fontWeight: '700', fontSize: '13px', color: '#fff' }}>Live Telemetry Feeds</span>
-                <span style={{ fontSize: '11px', color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>{EMERGENCY_ALERTS.length} Alerts</span>
-              </div>
-              {EMERGENCY_ALERTS.slice(0, 3).map(alert => (
-                <div 
-                  key={alert.id}
-                  onClick={() => {
-                    if (onOpenAlertModal) onOpenAlertModal(alert);
-                    setIsNotifOpen(false);
-                  }}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: 'var(--radius-sm)',
-                    background: alert.severity === 'CRITICAL' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(15, 23, 42, 0.8)',
-                    border: `1px solid ${alert.severity === 'CRITICAL' ? 'var(--hazard-red-border)' : 'var(--border-subtle)'}`,
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', color: alert.severity === 'CRITICAL' ? 'var(--hazard-red)' : '#fff' }}>
-                    <span>{alert.title}</span>
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{alert.timestamp}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {alert.description}
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>
+                    {alerts.length} Alerts
+                  </span>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); loadAlerts(); }}
+                    title="Refresh alerts"
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}
+                  >
+                    <Activity size={13} className={isLoadingAlerts ? 'spin-icon' : ''} />
+                  </button>
                 </div>
-              ))}
+              </div>
+
+              {/* Scrollable list of alerts */}
+              <div 
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  overflowY: 'auto',
+                  maxHeight: '380px',
+                  paddingRight: '4px'
+                }}
+              >
+                {alerts.length === 0 ? (
+                  <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                    No alerts logged in telemetry.
+                  </div>
+                ) : (
+                  alerts.map(alert => {
+                    const isCritical = (alert.severity || '').toUpperCase() === 'CRITICAL';
+                    const isDispatched = (alert.status || '').toUpperCase() === 'DISPATCHED';
+                    const isResolved = (alert.status || '').toUpperCase() === 'RESOLVED';
+
+                    return (
+                      <div 
+                        key={alert.id}
+                        onClick={() => {
+                          if (onOpenAlertModal) {
+                            onOpenAlertModal({
+                              ...alert,
+                              description: alert.message || alert.description,
+                              actionRequired: alert.action_required || alert.actionRequired || 'None'
+                            });
+                          }
+                          setIsNotifOpen(false);
+                        }}
+                        style={{
+                          padding: '10px',
+                          borderRadius: 'var(--radius-sm)',
+                          background: isCritical 
+                            ? (isResolved ? 'rgba(15, 23, 42, 0.8)' : 'rgba(239, 68, 68, 0.12)')
+                            : 'rgba(15, 23, 42, 0.8)',
+                          border: isCritical && !isResolved
+                            ? '1px solid var(--hazard-red-border)' 
+                            : '1px solid var(--border-subtle)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                          transition: 'background 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                          <span style={{ 
+                            fontSize: '11.5px', 
+                            fontWeight: '700', 
+                            color: isCritical && !isResolved ? 'var(--hazard-red)' : '#fff',
+                            lineHeight: '1.3'
+                          }}>
+                            {alert.title}
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
+                            {alert.timestamp}
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.4', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {alert.message || alert.description}
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <StatusBadge status={alert.severity} />
+                            {alert.status && alert.status !== 'ACTIVE' && (
+                              <StatusBadge status={alert.status} />
+                            )}
+                          </div>
+                          {alert.coordinates && (
+                            <span style={{ fontSize: '9.5px', color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>
+                              {alert.coordinates}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           )}
         </div>

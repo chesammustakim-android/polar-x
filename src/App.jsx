@@ -32,6 +32,7 @@ export default function App() {
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [isDispatching, setIsDispatching] = useState(false);
   const [dispatchFeedback, setDispatchFeedback] = useState(null);
+  const [alertsRefreshKey, setAlertsRefreshKey] = useState(0);
   const [selectedCargo, setSelectedCargo] = useState(null);
   const [selectedPerson, setSelectedPerson] = useState(null);
   // Expedition-scoped navigation filter (set when jumping from Expeditions page)
@@ -179,6 +180,7 @@ export default function App() {
         type: 'success',
         message: `SAR Unit ${unitLabel} successfully dispatched to coordinates: ${coordLabel}. Incident status updated to DISPATCHED.`
       });
+      setAlertsRefreshKey(prev => prev + 1);
     } catch (err) {
       console.error('[POLAR-X] SAR Dispatch failed:', err);
       setDispatchFeedback({
@@ -261,7 +263,12 @@ export default function App() {
           />
         );
       case 'emergency':
-        return <EmergencyPage onSelectAlert={handleOpenAlert} />;
+        return (
+          <EmergencyPage 
+            onSelectAlert={handleOpenAlert} 
+            onAlertStateChange={() => setAlertsRefreshKey(k => k + 1)}
+          />
+        );
       case 'automation':
         return <SmartAutomationPage />;
       case 'reports':
@@ -291,6 +298,7 @@ export default function App() {
           onOpenAlertModal={handleOpenAlert} 
           currentUser={currentUser}
           onLogout={handleLogout}
+          refreshTrigger={alertsRefreshKey}
         />
         
         <main className="page-container">
@@ -310,9 +318,49 @@ export default function App() {
                 className="btn-secondary" 
                 onClick={() => { setSelectedAlert(null); setDispatchFeedback(null); }}
               >
-                {selectedAlert.status === 'DISPATCHED' ? 'Close' : 'Dismiss'}
+                {selectedAlert.status === 'RESOLVED' ? 'Close' : selectedAlert.status === 'DISPATCHED' ? 'Close' : 'Dismiss'}
               </button>
-              {selectedAlert.status === 'DISPATCHED' ? (
+
+              {activeTab !== 'emergency' && (
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setActiveTab('emergency');
+                    setSelectedAlert(null);
+                    setDispatchFeedback(null);
+                  }}
+                  title="Open Antarctic Polar SAR Command Center"
+                >
+                  <ShieldAlert size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  Open Emergency Command
+                </button>
+              )}
+
+              {activeTab !== 'map' && selectedAlert.coordinates && (
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    setActiveTab('map');
+                    setSelectedAlert(null);
+                    setDispatchFeedback(null);
+                  }}
+                  title="View coordinates on Polar Geospatial Map"
+                >
+                  <Radio size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  View on Map
+                </button>
+              )}
+
+              {selectedAlert.status === 'RESOLVED' ? (
+                <button 
+                  className="btn-secondary" 
+                  disabled={true}
+                  style={{ opacity: 0.9, cursor: 'default', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.4)' }}
+                >
+                  <Check size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  Incident Resolved
+                </button>
+              ) : selectedAlert.status === 'DISPATCHED' ? (
                 <button 
                   className="btn-primary" 
                   disabled={true}
@@ -400,6 +448,28 @@ export default function App() {
                   </div>
                   <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
                     SAR response unit has been deployed to coordinates: {selectedAlert.coordinates || 'Maitri Sector'}.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!dispatchFeedback && selectedAlert.status === 'RESOLVED' && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                borderRadius: '8px',
+                padding: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <Check size={18} style={{ color: '#34d399', flexShrink: 0 }} />
+                <div>
+                  <div style={{ color: '#34d399', fontSize: '12.5px', fontWeight: '600' }}>
+                    Incident Operational Protocol Complete
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
+                    This incident has been marked as RESOLVED. Audit logs and closure telemetry recorded.
                   </div>
                 </div>
               </div>

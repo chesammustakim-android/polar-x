@@ -551,7 +551,7 @@ function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits })
 
 // ─── Main EmergencyPage ──────────────────────────────────────────────────────
 
-export default function EmergencyPage() {
+export default function EmergencyPage({ onSelectAlert, onAlertStateChange }) {
   const [incidents, setIncidents] = useState([]);
   const [stats, setStats] = useState(null);
   const [responseUnits, setResponseUnits] = useState([]);
@@ -595,6 +595,7 @@ export default function EmergencyPage() {
       await api.createIncident(payload);
       setShowReportModal(false);
       await loadAll();
+      if (onAlertStateChange) onAlertStateChange();
     } catch (e) {
       setError(e.message || 'Failed to report incident.');
     } finally {
@@ -831,7 +832,10 @@ export default function EmergencyPage() {
         <IncidentDetailDrawer
           incidentId={selectedIncidentId}
           onClose={() => setSelectedIncidentId(null)}
-          onRefresh={loadAll}
+          onRefresh={() => {
+            loadAll();
+            if (onAlertStateChange) onAlertStateChange();
+          }}
           responseUnits={responseUnits}
         />
       )}

@@ -1275,6 +1275,26 @@ def get_incident_detail(db: Session, incident_id: int):
         recommended_units=recommended
     )
 
+def sync_incident_alerts(db: Session, inc: models.Incident, new_status: str, action_text: str = None):
+    """Synchronize matching alerts with an incident's updated lifecycle state."""
+    filters = [
+        models.Alert.source.contains(inc.incident_code),
+        models.Alert.title.contains(inc.incident_code),
+        models.Alert.title.contains(inc.title)
+    ]
+    if inc.personnel_id:
+        person = inc.personnel or db.query(models.Personnel).filter(models.Personnel.id == inc.personnel_id).first()
+        if person and person.personnel_code:
+            filters.append(models.Alert.source.contains(person.personnel_code))
+            filters.append(models.Alert.title.contains(person.personnel_code))
+
+    matching_alerts = db.query(models.Alert).filter(or_(*filters)).all()
+    for al in matching_alerts:
+        al.status = new_status
+        if action_text:
+            al.action_required = action_text
+    return matching_alerts
+
 def create_incident(db: Session, inc_in: schemas.IncidentCreate, actor: str = "Logistics Officer"):
     timestamp = get_current_timestamp()
     inc_code = inc_in.incident_code or generate_incident_code(db)
@@ -1316,6 +1336,24 @@ def create_incident(db: Session, inc_in: schemas.IncidentCreate, actor: str = "L
         if unit:
             unit.status = "DISPATCHED" if db_inc.status == "DISPATCHED" else "ON_MISSION" if db_inc.status == "IN_PROGRESS" else unit.status
             unit.updated_at = timestamp
+
+    # Synchronize with Emergency Alerts / Live Telemetry Feeds
+    alert_type = "Distress" if db_inc.incident_type in ["MEDICAL", "MISSING_PERSON"] else "Operational" if db_inc.incident_type in ["CARGO", "VEHICLE"] else "System"
+    coords_str = f"{db_inc.latitude}, {db_inc.longitude}" if db_inc.latitude is not None and db_inc.longitude is not None else (db_inc.location_name or "Maitri Sector")
+    alert_action = f"Immediate SAR triage and response protocol initiated for {db_inc.location_name}." if db_inc.severity == "CRITICAL" else f"Triage and dispatch response unit to {db_inc.location_name}."
+    
+    alert = models.Alert(
+        type=alert_type,
+        title=f"Incident {db_inc.incident_code} — {db_inc.title}",
+        message=db_inc.description or f"Emergency incident reported at {db_inc.location_name}.",
+        severity=db_inc.severity or "HIGH",
+        timestamp=f"Just now ({timestamp[11:16]} UTC)" if len(timestamp) >= 16 else timestamp,
+        status="ACTIVE" if db_inc.status not in ["DISPATCHED", "RESOLVED", "CANCELLED"] else db_inc.status,
+        source=f"Incident [{db_inc.incident_code}]",
+        action_required=alert_action,
+        coordinates=coords_str
+    )
+    db.add(alert)
 
     db.commit()
     db.refresh(db_inc)
@@ -1468,6 +1506,13 @@ def dispatch_incident(db: Session, incident_id: int, action_update: schemas.Inci
         timestamp=timestamp
     )
 
+    sync_incident_alerts(
+        db=db,
+        inc=inc,
+        new_status="DISPATCHED",
+        action_text=f"Unit {unit.unit_code if unit else 'SAR'} dispatched to coordinates ({inc.latitude}, {inc.longitude}). Intercept protocol active."
+    )
+
     db.commit()
     db.refresh(inc)
     return enrich_incident_out(db, inc), None
@@ -1560,6 +1605,13 @@ def resolve_incident(db: Session, incident_id: int, resolve_update: schemas.Inci
         timestamp=timestamp
     )
 
+    sync_incident_alerts(
+        db=db,
+        inc=inc,
+        new_status="RESOLVED",
+        action_text=f"Incident resolved: {inc.resolution_notes}"
+    )
+
     db.commit()
     db.refresh(inc)
     return enrich_incident_out(db, inc), None
@@ -1592,6 +1644,13 @@ def cancel_incident(db: Session, incident_id: int, action_update: schemas.Incide
         notes=inc.resolution_notes,
         actor=actor,
         timestamp=timestamp
+    )
+
+    sync_incident_alerts(
+        db=db,
+        inc=inc,
+        new_status="CANCELLED",
+        action_text=f"Incident cancelled: {inc.resolution_notes}"
     )
 
     db.commit()
@@ -1795,6 +1854,21 @@ def create_or_get_personnel_sos_incident(
         actor=actor,
         timestamp=timestamp
     )
+
+    # Also synchronize emergency alert for Live Telemetry Feeds
+    coords_str = f"{person.latitude}, {person.longitude}" if person.latitude is not None and person.longitude is not None else (person.current_location or "Maitri Sector")
+    sos_alert = models.Alert(
+        type="Distress",
+        title=f"SOS Distress Beacon — {person.name} ({person.personnel_code})",
+        message=reason or f"Emergency SOS beacon triggered for {person.name} [{person.personnel_code}] at {person.current_location}.",
+        severity="CRITICAL",
+        timestamp=f"Just now ({timestamp[11:16]} UTC)" if len(timestamp) >= 16 else timestamp,
+        status="ACTIVE",
+        source=f"Incident [{incident.incident_code}] • Personnel [{person.personnel_code}]",
+        action_required=f"Immediate SAR dispatch required to {person.current_location}. GPS: ({coords_str}).",
+        coordinates=coords_str
+    )
+    db.add(sos_alert)
 
     db.commit()
     db.refresh(incident)

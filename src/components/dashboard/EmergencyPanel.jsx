@@ -28,7 +28,7 @@ export default function EmergencyPanel({ alerts = [], onAcknowledgeAlert, onOpen
                 <span>{alert.title}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <StatusBadge status={alert.severity} />
+                <StatusBadge status={alert.status === 'DISPATCHED' ? 'DISPATCHED' : (alert.status === 'RESOLVED' ? 'RESOLVED' : alert.severity)} />
                 <span className="emergency-timestamp">{alert.timestamp}</span>
               </div>
             </div>
@@ -43,17 +43,31 @@ export default function EmergencyPanel({ alerts = [], onAcknowledgeAlert, onOpen
                 <span>{alert.actionRequired}</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                {isCritical && (
+                {isCritical && alert.status !== 'RESOLVED' && (
                   <button 
                     className="btn-danger"
                     style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
                     onClick={() => onOpenDetails && onOpenDetails(alert)}
                   >
                     <Radio size={12} />
-                    Track SAR Intercept
+                    {alert.status === 'DISPATCHED' ? 'Track SAR Mission' : 'Track SAR Intercept'}
                   </button>
                 )}
-                {onAcknowledgeAlert && alert.status !== 'RESOLVED' && (
+                {alert.status === 'RESOLVED' && (
+                  <span style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Check size={12} /> Resolved
+                  </span>
+                )}
+                {onOpenDetails && !isCritical && (
+                  <button 
+                    className="btn-secondary"
+                    style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    onClick={() => onOpenDetails(alert)}
+                  >
+                    Details
+                  </button>
+                )}
+                {onAcknowledgeAlert && !['RESOLVED', 'DISPATCHED'].includes(alert.status) && (
                   <button 
                     className="btn-secondary"
                     style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
