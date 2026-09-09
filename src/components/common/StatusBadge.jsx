@@ -18,7 +18,7 @@ export default function StatusBadge({ status, label, className = '' }) {
     variant = 'success';
   // Info / in-motion states
   } else if (['in-transit', 'info', 'customs-cleared', 'loaded', 'field',
-              'in-transit'].includes(normalized)) {
+              'dispatched', 'in-progress'].includes(normalized)) {
     variant = 'info';
   // Neutral / passive states
   } else if (['preparing', 'resting', 'off-duty', 'off duty'].includes(normalized)) {

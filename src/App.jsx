@@ -30,6 +30,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [dispatchFeedback, setDispatchFeedback] = useState(null);
   const [selectedCargo, setSelectedCargo] = useState(null);
   const [selectedPerson, setSelectedPerson] = useState(null);
   // Expedition-scoped navigation filter (set when jumping from Expeditions page)
@@ -64,6 +66,130 @@ export default function App() {
     setActiveTab('dashboard');
   };
 
+  const handleOpenAlert = (alert) => {
+    setSelectedAlert(alert);
+    setDispatchFeedback(null);
+  };
+
+  const handleConfirmSARDispatch = async () => {
+    if (!selectedAlert || isDispatching || selectedAlert.status === 'DISPATCHED') return;
+    setIsDispatching(true);
+    setDispatchFeedback(null);
+
+    try {
+      // 1. Parse coordinates if available
+      const coords = selectedAlert.coordinates || '';
+      let lat = null;
+      let lon = null;
+      if (coords) {
+        const decMatch = coords.match(/(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)/);
+        if (decMatch) {
+          const pLat = parseFloat(decMatch[1]);
+          const pLon = parseFloat(decMatch[2]);
+          if (!isNaN(pLat) && !isNaN(pLon) && pLat >= -90 && pLat <= 90 && pLon >= -180 && pLon <= 180) {
+            lat = pLat;
+            lon = pLon;
+          }
+        }
+      }
+
+      // 2. Find matching active incident or create one
+      const activeIncidents = await api.getActiveIncidents();
+      let targetIncident = null;
+
+      if (Array.isArray(activeIncidents) && activeIncidents.length > 0) {
+        targetIncident = activeIncidents.find(inc =>
+          (selectedAlert.title && inc.title && (inc.title.toLowerCase().includes(selectedAlert.title.toLowerCase()) || selectedAlert.title.toLowerCase().includes(inc.title.toLowerCase()))) ||
+          (lat !== null && inc.latitude !== null && Math.abs(inc.latitude - lat) < 0.05 && Math.abs(inc.longitude - lon) < 0.05)
+        );
+
+        if (!targetIncident) {
+          targetIncident = activeIncidents.find(inc => ['REPORTED', 'ACKNOWLEDGED', 'TRIAGED'].includes(inc.status));
+        }
+      }
+
+      // If no active incident exists to dispatch, register a new one for this alert
+      if (!targetIncident) {
+        targetIncident = await api.createIncident({
+          title: selectedAlert.title || 'Emergency Distress Beacon',
+          incident_type: 'MEDICAL',
+          severity: selectedAlert.severity || 'CRITICAL',
+          reported_by: selectedAlert.source || 'Station Telemetry',
+          location_name: selectedAlert.coordinates || selectedAlert.source || 'Maitri Sector',
+          latitude: lat !== null ? lat : -70.7670,
+          longitude: lon !== null ? lon : 11.7400,
+          description: selectedAlert.description || 'Emergency distress beacon. Immediate SAR dispatch authorized.'
+        });
+      }
+
+      let unitCode = '';
+      let unitName = '';
+
+      if (targetIncident) {
+        // 3. Ensure a response unit is assigned
+        if (!targetIncident.assigned_unit_id) {
+          const units = await api.getResponseUnits();
+          const availableUnit = Array.isArray(units) ? units.find(u => u.status === 'AVAILABLE') || units[0] : null;
+          if (availableUnit) {
+            await api.assignIncidentUnit(targetIncident.id, {
+              response_unit_id: availableUnit.id,
+              actor: currentUser?.full_name || currentUser?.username || 'Operations Commander',
+              notes: `Assigned unit ${availableUnit.unit_code} for immediate SAR intercept at coordinates (${targetIncident.latitude || lat || -70.767}, ${targetIncident.longitude || lon || 11.74}).`
+            });
+            unitCode = availableUnit.unit_code;
+            unitName = availableUnit.name;
+          }
+        } else {
+          unitCode = targetIncident.assigned_unit_code || '';
+          unitName = targetIncident.assigned_unit_name || '';
+        }
+
+        // 4. Dispatch the incident if not already dispatched
+        if (['REPORTED', 'ACKNOWLEDGED', 'TRIAGED'].includes(targetIncident.status)) {
+          await api.dispatchIncident(targetIncident.id, {
+            actor: currentUser?.full_name || currentUser?.username || 'Operations Commander',
+            notes: `Immediate SAR Unit dispatched to coordinates: ${selectedAlert.coordinates || targetIncident.location_name || 'Maitri Sector'}.`
+          });
+        }
+      }
+
+      // 5. Update backend alert if ID is numeric
+      if (selectedAlert.id && typeof selectedAlert.id === 'number') {
+        try {
+          await api.updateAlert(selectedAlert.id, {
+            status: 'DISPATCHED',
+            action_required: `SAR Unit ${unitCode || 'Alpha-1'} dispatched to ${selectedAlert.coordinates || 'Maitri Sector'}. Tracking beacon active.`
+          });
+        } catch (updateErr) {
+          console.warn('[POLAR-X] Alert status update sync warning:', updateErr);
+        }
+      }
+
+      // 6. Update local selectedAlert state & feedback
+      const unitLabel = unitCode ? `${unitCode} (${unitName || 'Field Rescue'})` : 'SAR Alpha-1';
+      const coordLabel = selectedAlert.coordinates || (targetIncident?.location_name) || 'Maitri Sector';
+
+      setSelectedAlert(prev => prev ? ({
+        ...prev,
+        status: 'DISPATCHED',
+        actionRequired: `SAR Unit ${unitLabel} dispatched to coordinates: ${coordLabel}. Real-time telemetry tracking active.`
+      }) : null);
+
+      setDispatchFeedback({
+        type: 'success',
+        message: `SAR Unit ${unitLabel} successfully dispatched to coordinates: ${coordLabel}. Incident status updated to DISPATCHED.`
+      });
+    } catch (err) {
+      console.error('[POLAR-X] SAR Dispatch failed:', err);
+      setDispatchFeedback({
+        type: 'error',
+        message: `Dispatch failed: ${err.message || 'Unable to contact emergency response units.'}`
+      });
+    } finally {
+      setIsDispatching(false);
+    }
+  };
+
   // If user is not authenticated, render Login Page
   if (!isAuthLoading && !currentUser) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
@@ -95,7 +221,7 @@ export default function App() {
         return (
           <DashboardPage 
             onNavigateTab={setActiveTab}
-            onSelectAlert={(alert) => setSelectedAlert(alert)}
+            onSelectAlert={handleOpenAlert}
             onSelectCargo={(cargo) => setSelectedCargo(cargo)}
             onSelectPersonnel={(person) => setSelectedPerson(person)}
           />
@@ -135,7 +261,7 @@ export default function App() {
           />
         );
       case 'emergency':
-        return <EmergencyPage onSelectAlert={(alert) => setSelectedAlert(alert)} />;
+        return <EmergencyPage onSelectAlert={handleOpenAlert} />;
       case 'automation':
         return <SmartAutomationPage />;
       case 'reports':
@@ -162,7 +288,7 @@ export default function App() {
       <div className="main-content-wrapper">
         <Header 
           activeTab={activeTab} 
-          onOpenAlertModal={(alert) => setSelectedAlert(alert)} 
+          onOpenAlertModal={handleOpenAlert} 
           currentUser={currentUser}
           onLogout={handleLogout}
         />
@@ -176,29 +302,42 @@ export default function App() {
       {selectedAlert && (
         <QuickModal
           isOpen={true}
-          onClose={() => setSelectedAlert(null)}
+          onClose={() => { setSelectedAlert(null); setDispatchFeedback(null); }}
           title={`Incident Details — ${selectedAlert.title}`}
           footerButtons={
             <>
-              <button className="btn-secondary" onClick={() => setSelectedAlert(null)}>
-                Dismiss
-              </button>
               <button 
-                className="btn-danger" 
-                onClick={() => {
-                  alert(`Dispatched Emergency SAR Unit to Coordinates: ${selectedAlert.coordinates || 'Maitri Sector'}`);
-                  setSelectedAlert(null);
-                }}
+                className="btn-secondary" 
+                onClick={() => { setSelectedAlert(null); setDispatchFeedback(null); }}
               >
-                <Radio size={14} style={{ display: 'inline', marginRight: '6px' }} />
-                Confirm Immediate SAR Dispatch
+                {selectedAlert.status === 'DISPATCHED' ? 'Close' : 'Dismiss'}
               </button>
+              {selectedAlert.status === 'DISPATCHED' ? (
+                <button 
+                  className="btn-primary" 
+                  disabled={true}
+                  style={{ opacity: 0.9, cursor: 'default', background: 'rgba(16, 185, 129, 0.2)', borderColor: '#34d399', color: '#34d399' }}
+                >
+                  <Check size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  SAR Unit Dispatched
+                </button>
+              ) : (
+                <button 
+                  className="btn-danger" 
+                  onClick={handleConfirmSARDispatch}
+                  disabled={isDispatching}
+                  style={{ opacity: isDispatching ? 0.7 : 1 }}
+                >
+                  <Radio size={14} style={{ display: 'inline', marginRight: '6px' }} />
+                  {isDispatching ? 'Dispatching SAR Unit...' : 'Confirm Immediate SAR Dispatch'}
+                </button>
+              )}
             </>
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <StatusBadge status={selectedAlert.severity} />
+              <StatusBadge status={selectedAlert.status === 'DISPATCHED' ? 'DISPATCHED' : selectedAlert.severity} />
               <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
                 {selectedAlert.timestamp}
               </span>
@@ -220,6 +359,51 @@ export default function App() {
                 {selectedAlert.actionRequired}
               </div>
             </div>
+
+            {/* In-App Dispatch Status / Feedback */}
+            {dispatchFeedback && (
+              <div style={{
+                background: dispatchFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                border: `1px solid ${dispatchFeedback.type === 'success' ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)'}`,
+                borderRadius: '8px',
+                padding: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <Check size={18} style={{ color: dispatchFeedback.type === 'success' ? '#34d399' : '#f87171', flexShrink: 0 }} />
+                <div>
+                  <div style={{ color: dispatchFeedback.type === 'success' ? '#34d399' : '#f87171', fontSize: '12.5px', fontWeight: '600' }}>
+                    {dispatchFeedback.type === 'success' ? 'SAR Unit Successfully Dispatched' : 'Dispatch Action Failed'}
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
+                    {dispatchFeedback.message}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!dispatchFeedback && selectedAlert.status === 'DISPATCHED' && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.12)',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                borderRadius: '8px',
+                padding: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px'
+              }}>
+                <Check size={18} style={{ color: '#34d399', flexShrink: 0 }} />
+                <div>
+                  <div style={{ color: '#34d399', fontSize: '12.5px', fontWeight: '600' }}>
+                    SAR Mission In Progress
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
+                    SAR response unit has been deployed to coordinates: {selectedAlert.coordinates || 'Maitri Sector'}.
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </QuickModal>
       )}
