@@ -479,6 +479,39 @@ class DailyConsumptionRecordOut(DailyConsumptionRecordBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# --- STATION RESOURCE INTELLIGENCE SCHEMA (PASS 2) ---
+class StationIntelligenceItemOut(BaseModel):
+    """Deterministic station resource intelligence: burn rate, trend, forecast, risk."""
+    requirement_id: int
+    station_id: int
+    station_name: str
+    item_code: str
+    item_name: str
+    minimum_quantity: float
+    unit: str
+    # Current stock from matching Inventory row (None if no match found)
+    current_stock: Optional[float] = None
+    # Positive = surplus, negative = deficit
+    surplus_deficit: Optional[float] = None
+    # Burn rate from real DailyConsumptionRecord data
+    burn_rate_value: Optional[float] = None
+    burn_rate_text: str  # e.g. "140 L/day" or "Insufficient consumption history"
+    # Trend from deterministic comparison: STABLE / INCREASING / DECREASING / INSUFFICIENT DATA
+    trend: str
+    trend_pct: Optional[float] = None
+    # Forecast
+    days_remaining: Optional[int] = None
+    days_to_minimum: Optional[int] = None
+    forecast_status: str  # e.g. "14 days until reserve breach" or "Forecast unavailable"
+    # Risk
+    risk_score: float
+    risk_level: str  # NORMAL / LOW / CRITICAL / URGENT
+    risk_factors: List[str] = []
+    why_flagged: List[str] = []
+    consumption_record_count: int
+    has_sufficient_history: bool
+
+
 # --- RESPONSE UNIT SCHEMAS ---
 class ResponseUnitBase(BaseModel):
     unit_code: str
@@ -774,6 +807,13 @@ class InventoryRiskItemOut(BaseModel):
     factors: List[ContributingFactor]
     explanation: str
     recommended_action: str
+    # Pass 2: optional station intelligence enrichment
+    station_name: Optional[str] = None
+    burn_rate_text: Optional[str] = None
+    trend: Optional[str] = None
+    days_to_minimum: Optional[int] = None
+    forecast_status: Optional[str] = None
+    why_flagged: List[str] = []
 
 class CargoRiskItemOut(BaseModel):
     cargo_id: int

@@ -4,10 +4,11 @@ import {
   CheckCircle2, XCircle, Clock, ArrowRight, ArrowDownRight,
   ArrowUpRight, Edit3, Eye, History, ShieldAlert,
   Compass, MapPin, Layers, X, Loader, Check, Info, ShieldCheck,
-  TrendingDown, TrendingUp, AlertCircle
+  TrendingDown, TrendingUp, AlertCircle, Building
 } from 'lucide-react';
 import { api } from '../services/api';
 import StatusBadge from '../components/common/StatusBadge';
+import QuickModal from '../components/common/QuickModal';
 
 const CATEGORIES = [
   'Food',
@@ -801,9 +802,359 @@ function ExpeditionReadinessView({ readinessList = [], loading, onRefresh }) {
   );
 }
 
+// ─── STATION RESOURCE EXPLAINABILITY MODAL (PASS 2) ─────────────────────────
+function StationResourceExplainModal({ item, onClose }) {
+  if (!item) return null;
+  const isBreached = item.current_stock !== null && item.current_stock <= item.minimum_quantity;
+  const riskColor = item.risk_level === 'URGENT' || item.risk_level === 'CRITICAL' 
+    ? 'var(--hazard-red)' 
+    : item.risk_level === 'LOW' 
+      ? 'var(--hazard-amber)' 
+      : 'var(--hazard-green)';
+
+  return (
+    <QuickModal
+      isOpen={true}
+      onClose={onClose}
+      title={`Station Resource Risk Analysis — ${item.item_name} (${item.item_code})`}
+      footerButtons={
+        <button className="btn-secondary" onClick={onClose}>
+          Close Analysis
+        </button>
+      }
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Telemetry Summary Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: '10px',
+          background: 'rgba(15,23,42,0.6)',
+          padding: '12px',
+          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--border-subtle)'
+        }}>
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>POLAR FACILITY</div>
+            <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#fff', marginTop: '2px' }}>{item.station_name}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>CURRENT STOCK</div>
+            <div style={{ fontSize: '12.5px', fontWeight: 700, color: isBreached ? 'var(--hazard-red)' : '#fff', marginTop: '2px' }}>
+              {item.current_stock !== null ? `${item.current_stock.toLocaleString()} ${item.unit}` : 'Stock unavailable'}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>MIN REQUIRED</div>
+            <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--cyan-300)', marginTop: '2px' }}>
+              {item.minimum_quantity.toLocaleString()} {item.unit}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>SURPLUS / DEFICIT</div>
+            <div style={{
+              fontSize: '12.5px',
+              fontWeight: 700,
+              color: item.surplus_deficit !== null && item.surplus_deficit < 0 ? 'var(--hazard-red)' : 'var(--hazard-green)',
+              marginTop: '2px'
+            }}>
+              {item.surplus_deficit !== null ? `${item.surplus_deficit > 0 ? '+' : ''}${item.surplus_deficit.toLocaleString()} ${item.unit}` : '—'}
+            </div>
+          </div>
+        </div>
+
+        {/* Burn Rate & Consumption Trend */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>7-DAY BURN RATE</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: item.burn_rate_value ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
+              {item.burn_rate_text}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              {item.consumption_record_count} real consumption records evaluated
+            </div>
+          </div>
+          <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>CONSUMPTION TREND</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span className={`status-badge ${item.trend === 'INCREASING' ? 'badge-danger' : item.trend === 'DECREASING' ? 'badge-success' : item.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
+                {item.trend}
+              </span>
+              {item.trend_pct !== null && (
+                <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                  ({item.trend_pct > 0 ? '+' : ''}{item.trend_pct}%)
+                </span>
+              )}
+            </div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              Deterministic recent 7d vs prior 7d comparison
+            </div>
+          </div>
+        </div>
+
+        {/* Forecast & Risk Level */}
+        <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>FORECAST / DAYS REMAINING</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff', marginTop: '2px' }}>
+              {item.forecast_status}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>OPERATIONAL RISK</div>
+            <div style={{ fontSize: '14px', fontWeight: 800, color: riskColor, marginTop: '2px' }}>
+              {item.risk_level} ({item.risk_score}%)
+            </div>
+          </div>
+        </div>
+
+        {/* WHY THIS WAS FLAGGED */}
+        <div style={{ border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.04)', borderRadius: 'var(--radius-md)', padding: '14px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--hazard-red)', fontFamily: 'var(--font-mono)', letterSpacing: '0.8px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <AlertTriangle size={13} />
+            WHY THIS WAS FLAGGED
+          </div>
+          <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {item.why_flagged && item.why_flagged.length > 0 ? (
+              item.why_flagged.map((factor, idx) => (
+                <li key={idx} style={{ fontSize: '11.5px', color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                  {factor}
+                </li>
+              ))
+            ) : (
+              <li style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                Stock reserve satisfies minimum operational threshold.
+              </li>
+            )}
+          </ul>
+        </div>
+
+        <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px' }}>
+          • Deterministic calculation based on active database telemetry and StationResourceRequirement thresholds. No machine learning or artificial intelligence claims.
+        </div>
+      </div>
+    </QuickModal>
+  );
+}
+
+// ─── STATION RESOURCE REQUIREMENTS VIEW (PASS 2) ────────────────────────────
+function StationRequirementsView({
+  intelList = [],
+  loading = false,
+  stations = [],
+  selectedStationId = '',
+  onStationChange,
+  isStationHead = false,
+  userStationName = '',
+  onRefresh,
+  onOpenExplain
+}) {
+  const urgentCount = intelList.filter(i => i.risk_level === 'URGENT').length;
+  const criticalCount = intelList.filter(i => i.risk_level === 'CRITICAL').length;
+  const lowCount = intelList.filter(i => i.risk_level === 'LOW').length;
+  const normalCount = intelList.filter(i => i.risk_level === 'NORMAL').length;
+
+  return (
+    <div className="station-requirements-view">
+      {/* Station Scope & Context Banner */}
+      <div className="station-context-banner">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <Building size={16} style={{ color: 'var(--cyan-400)' }} />
+          {isStationHead ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="station-context-pill">
+                Assigned Station: {userStationName || 'Maitri Station'}
+              </span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                Station-scoped view • Restricted to assigned facility only
+              </span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)' }}>Filter by Polar Facility:</span>
+              <select
+                className="inventory-filter-select"
+                value={selectedStationId}
+                onChange={e => onStationChange(e.target.value)}
+                style={{ minWidth: '220px' }}
+              >
+                <option value="">All Polar Facilities & Outposts</option>
+                {stations.map(st => (
+                  <option key={st.id} value={st.id}>
+                    {st.name} ({st.type})
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                Director / Admin System-wide Access
+              </span>
+            </div>
+          )}
+        </div>
+
+        <button
+          className="btn-secondary"
+          onClick={onRefresh}
+          style={{ padding: '6px 12px', fontSize: '11px' }}
+        >
+          <RefreshCw size={13} className={loading ? 'radar-sweep-icon' : ''} />
+          Refresh Telemetry
+        </button>
+      </div>
+
+      {/* Summary Stat Pills */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+        <div style={{ padding: '10px 14px', background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>TOTAL REQUIREMENTS</div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: '#fff', marginTop: '2px' }}>{intelList.length}</div>
+        </div>
+        <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--hazard-red)', fontFamily: 'var(--font-mono)' }}>URGENT DEFICITS</div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--hazard-red)', marginTop: '2px' }}>{urgentCount}</div>
+        </div>
+        <div style={{ padding: '10px 14px', background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--hazard-amber)', fontFamily: 'var(--font-mono)' }}>CRITICAL RISKS</div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--hazard-amber)', marginTop: '2px' }}>{criticalCount}</div>
+        </div>
+        <div style={{ padding: '10px 14px', background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 'var(--radius-sm)' }}>
+          <div style={{ fontSize: '10px', color: 'var(--hazard-green)', fontFamily: 'var(--font-mono)' }}>NOMINAL BUFFERS</div>
+          <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--hazard-green)', marginTop: '2px' }}>{normalCount + lowCount}</div>
+        </div>
+      </div>
+
+      {/* Table Panel */}
+      <div className="inventory-table-panel">
+        <div className="inventory-table-header">
+          <div className="inventory-table-title-group">
+            <Boxes size={16} className="inventory-table-icon" />
+            <span className="inventory-table-title">Persisted Station Resource Requirements & Burn Rates</span>
+            <span className="inventory-count-badge">{intelList.length} REQUIREMENTS</span>
+          </div>
+          <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+            NCPOR Antarctic Operations • Deterministic 7-Day Burn Rate
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="cargo-loading">
+            <Loader size={18} className="radar-sweep-icon" /> Computing burn rates and inventory intelligence…
+          </div>
+        ) : intelList.length === 0 ? (
+          <div className="cargo-empty-state">
+            <Building size={22} style={{ margin: '0 auto 8px', color: 'var(--text-muted)' }} />
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No station resource requirements configured.</p>
+            <p style={{ fontSize: 11, marginTop: 4 }}>Requirements can be defined by Expedition Directors in Station Management.</p>
+          </div>
+        ) : (
+          <div className="inventory-table-wrap">
+            <table className="inventory-table">
+              <thead>
+                <tr>
+                  <th>Station</th>
+                  <th>Item Code</th>
+                  <th>Item Name</th>
+                  <th>Current Stock</th>
+                  <th>Min Required</th>
+                  <th>Surplus / Deficit</th>
+                  <th>7-Day Burn Rate</th>
+                  <th>Trend</th>
+                  <th>Forecast / Runway</th>
+                  <th>Risk Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {intelList.map(req => {
+                  const hasStock = req.current_stock !== null;
+                  const isDeficit = req.surplus_deficit !== null && req.surplus_deficit < 0;
+                  const isUrgentOrCrit = req.risk_level === 'URGENT' || req.risk_level === 'CRITICAL';
+
+                  return (
+                    <tr key={req.requirement_id} onClick={() => onOpenExplain(req)}>
+                      <td style={{ fontWeight: 600, color: '#fff' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <MapPin size={12} style={{ color: 'var(--cyan-400)' }} />
+                          {req.station_name}
+                        </div>
+                      </td>
+                      <td>
+                        <span className="item-code-cell">{req.item_code}</span>
+                      </td>
+                      <td style={{ fontWeight: 500, color: '#fff' }}>
+                        {req.item_name}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                        {hasStock ? (
+                          <span style={{ color: req.current_stock <= req.minimum_quantity ? 'var(--hazard-red)' : '#fff' }}>
+                            {req.current_stock.toLocaleString()} {req.unit}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic' }}>
+                            Stock unavailable
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--cyan-300)' }}>
+                        {req.minimum_quantity.toLocaleString()} {req.unit}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700 }}>
+                        {req.surplus_deficit !== null ? (
+                          <span style={{ color: isDeficit ? 'var(--hazard-red)' : 'var(--hazard-green)' }}>
+                            {req.surplus_deficit > 0 ? '+' : ''}{req.surplus_deficit.toLocaleString()} {req.unit}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>
+                        <span style={{ color: req.burn_rate_value ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
+                          {req.burn_rate_text}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`status-badge ${req.trend === 'INCREASING' ? 'badge-danger' : req.trend === 'DECREASING' ? 'badge-success' : req.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
+                          {req.trend}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>
+                        <span style={{ color: isUrgentOrCrit ? 'var(--hazard-red)' : 'var(--text-secondary)' }}>
+                          {req.forecast_status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`status-badge ${req.risk_level === 'URGENT' || req.risk_level === 'CRITICAL' ? 'badge-danger' : req.risk_level === 'LOW' ? 'badge-warning' : 'badge-success'}`}>
+                          {req.risk_level}
+                        </span>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <button
+                          className="req-explain-btn"
+                          onClick={() => onOpenExplain(req)}
+                          title="View contributing factors and explainability analysis"
+                        >
+                          <Eye size={12} /> Explain
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN: INVENTORY PAGE ───────────────────────────────────────────────────
-export default function InventoryPage() {
-  const [viewMode, setViewMode] = useState('catalog'); // 'catalog' | 'readiness'
+export default function InventoryPage({ currentUser }) {
+  const user = currentUser || api.getStoredUser() || {};
+  const userRole = (user.role || '').toUpperCase();
+  const isStationHead = userRole === 'STATION_HEAD';
+  const isDirectorOrAdmin = userRole === 'ADMIN' || userRole === 'EXPEDITION_DIRECTOR';
+
+  const [viewMode, setViewMode] = useState('catalog'); // 'catalog' | 'station-requirements' | 'readiness'
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
   const [expeditions, setExpeditions] = useState([]);
@@ -812,6 +1163,13 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [readinessLoading, setReadinessLoading] = useState(false);
   
+  // Station Intelligence State (Pass 2)
+  const [stationIntel, setStationIntel] = useState([]);
+  const [stationIntelLoading, setStationIntelLoading] = useState(false);
+  const [stations, setStations] = useState([]);
+  const [selectedStationFilter, setSelectedStationFilter] = useState('');
+  const [explainModalItem, setExplainModalItem] = useState(null);
+
   // Filter States
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -861,6 +1219,38 @@ export default function InventoryPage() {
     }
   }, []);
 
+  // Load Station Intelligence (Pass 2)
+  const loadStationIntel = useCallback(async () => {
+    setStationIntelLoading(true);
+    try {
+      const param = isStationHead ? null : (selectedStationFilter || null);
+      const data = await api.getStationInventoryIntelligence(param);
+      setStationIntel(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('[InventoryPage] Station intel load error:', err);
+    } finally {
+      setStationIntelLoading(false);
+    }
+  }, [isStationHead, selectedStationFilter]);
+
+  // Load Stations List (for Director/Admin filter)
+  const loadStationsList = useCallback(async () => {
+    try {
+      const data = await api.getStations();
+      setStations(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.warn('[InventoryPage] Stations load error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStationsList();
+  }, [loadStationsList]);
+
+  useEffect(() => {
+    loadStationIntel();
+  }, [loadStationIntel]);
+
   useEffect(() => {
     const t = setTimeout(loadInventory, 300);
     return () => clearTimeout(t);
@@ -869,8 +1259,10 @@ export default function InventoryPage() {
   useEffect(() => {
     if (viewMode === 'readiness') {
       loadReadiness();
+    } else if (viewMode === 'station-requirements') {
+      loadStationIntel();
     }
-  }, [viewMode, loadReadiness]);
+  }, [viewMode, loadReadiness, loadStationIntel]);
 
   // Quick stat card click filter
   const handleStatFilter = (statusVal) => {
@@ -961,7 +1353,7 @@ export default function InventoryPage() {
         })}
       </div>
 
-      {/* ─── Navigation View Switcher (Catalog vs Readiness) ─── */}
+      {/* ─── Navigation View Switcher (Catalog vs Station Requirements vs Readiness) ─── */}
       <div className="inventory-view-switcher">
         <button
           className={`view-switch-btn ${viewMode === 'catalog' ? 'active' : ''}`}
@@ -970,6 +1362,14 @@ export default function InventoryPage() {
           <Boxes size={15} />
           Inventory Resource Catalog
           <span className="view-badge-count">{items.length}</span>
+        </button>
+        <button
+          className={`view-switch-btn ${viewMode === 'station-requirements' ? 'active' : ''}`}
+          onClick={() => { setViewMode('station-requirements'); loadStationIntel(); }}
+        >
+          <Building size={15} />
+          Station Requirements & Burn Rates
+          <span className="view-badge-count">{stationIntel.length} Monitored</span>
         </button>
         <button
           className={`view-switch-btn ${viewMode === 'readiness' ? 'active' : ''}`}
@@ -997,6 +1397,12 @@ export default function InventoryPage() {
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
+
+            {isStationHead && (
+              <span className="station-context-pill" title="Station Head Scoped Context">
+                <Building size={12} /> {user.assigned_station_name || (stations.find(s => s.id === user.assigned_station_id)?.name) || 'Maitri Station'} (Assigned)
+              </span>
+            )}
 
             <div className="inventory-control-divider" />
 
@@ -1080,7 +1486,7 @@ export default function InventoryPage() {
                       <th>Unit</th>
                       <th>Location</th>
                       <th>Status</th>
-                      <th>Last Updated</th>
+                      <th className="inventory-col-updated-th">Last Updated</th>
                       <th>Action</th>
                     </tr>
                   </thead>
@@ -1120,8 +1526,8 @@ export default function InventoryPage() {
                         <td>
                           <StatusBadge status={item.status} />
                         </td>
-                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-muted)' }}>
-                          {item.updated_at || 'Recent'}
+                        <td className="inventory-col-updated">
+                          {item.updated_at ? item.updated_at.replace('T', ' ').substring(0, 16) : 'Recent'}
                         </td>
                         <td>
                           <div className="item-actions-group" onClick={e => e.stopPropagation()}>
@@ -1151,7 +1557,22 @@ export default function InventoryPage() {
         </>
       )}
 
-      {/* ─── VIEW 2: EXPEDITION READINESS ─── */}
+      {/* ─── VIEW 2: STATION REQUIREMENTS & INTELLIGENCE (PASS 2) ─── */}
+      {viewMode === 'station-requirements' && (
+        <StationRequirementsView
+          intelList={stationIntel}
+          loading={stationIntelLoading}
+          stations={stations}
+          selectedStationId={selectedStationFilter}
+          onStationChange={setSelectedStationFilter}
+          isStationHead={isStationHead}
+          userStationName={user.assigned_station_name || (stations.find(s => s.id === user.assigned_station_id)?.name) || 'Maitri Station'}
+          onRefresh={loadStationIntel}
+          onOpenExplain={(item) => setExplainModalItem(item)}
+        />
+      )}
+
+      {/* ─── VIEW 3: EXPEDITION READINESS ─── */}
       {viewMode === 'readiness' && (
         <ExpeditionReadinessView
           readinessList={readinessList}
@@ -1188,6 +1609,14 @@ export default function InventoryPage() {
           onClose={() => setSelectedItemId(null)}
           onRefreshList={loadInventory}
           onOpenStockModal={(item) => setStockModalItem(item)}
+        />
+      )}
+
+      {/* ─── STATION RESOURCE EXPLAINABILITY MODAL (PASS 2) ─── */}
+      {explainModalItem && (
+        <StationResourceExplainModal
+          item={explainModalItem}
+          onClose={() => setExplainModalItem(null)}
         />
       )}
     </div>

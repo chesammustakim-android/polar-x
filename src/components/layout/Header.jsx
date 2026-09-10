@@ -8,7 +8,8 @@ import {
   User, 
   Activity,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  LogOut
 } from 'lucide-react';
 import { SYSTEM_META, EMERGENCY_ALERTS } from '../../data/mockData';
 import { api } from '../../services/api';
@@ -125,6 +126,41 @@ export default function Header({ activeTab, onOpenAlertModal, currentUser, onLog
           <Radio size={14} style={{ color: 'var(--hazard-green)' }} />
           <span>SAT-COM 99.8%</span>
         </div>
+
+        {/* Direct Logout button — 1-click session switch */}
+        {onLogout && (
+          <button
+            onClick={onLogout}
+            title="Log out of current session"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 11px',
+              background: 'rgba(239,68,68,0.08)',
+              border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'rgba(239,100,100,0.9)',
+              fontSize: '11.5px',
+              fontWeight: 600,
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+              transition: 'background 0.15s ease, border-color 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.18)';
+              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.6)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
+              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)';
+            }}
+          >
+            <LogOut size={13} />
+            Log Out
+          </button>
+        )}
 
         {/* Notifications Button */}
         <div style={{ position: 'relative' }}>

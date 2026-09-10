@@ -250,7 +250,7 @@ export default function App() {
           />
         );
       case 'inventory':
-        return <InventoryPage />;
+        return <InventoryPage currentUser={currentUser} />;
       case 'personnel':
         return (
           <PersonnelPage

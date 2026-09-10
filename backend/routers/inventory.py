@@ -2,9 +2,76 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import crud, schemas
+from .. import crud, schemas, models
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/inventory", tags=["Smart Inventory Management"])
+
+
+@router.get("/station-intelligence", response_model=List[schemas.StationIntelligenceItemOut])
+def get_station_inventory_intelligence(
+    station_id: Optional[int] = Query(None, description="Filter by station ID (Director/Admin only)"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns station resource intelligence: burn rate, trend, days-to-minimum, and risk
+    derived from real StationResourceRequirement and DailyConsumptionRecord data.
+
+    STATION_HEAD: automatically scoped to assigned station; station_id param is ignored.
+    EXPEDITION_DIRECTOR / ADMIN: can filter by station_id or get all stations.
+    """
+    role = (current_user.role or "").upper()
+
+    if role == "STATION_HEAD":
+        # Enforce station scope — ignore any query param
+        effective_station_id = current_user.assigned_station_id
+        if effective_station_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Your Station Head account is not yet assigned to a station. Contact your administrator."
+            )
+    elif role in ["ADMIN", "EXPEDITION_DIRECTOR"]:
+        effective_station_id = station_id  # None = all stations
+    else:
+        raise HTTPException(
+            status_code=403,
+            detail="Station resource intelligence requires Station Head, Expedition Director, or Admin access."
+        )
+
+    raw = crud.get_station_resource_intelligence(db, station_id=effective_station_id)
+
+    results = []
+    for item in raw:
+        results.append(schemas.StationIntelligenceItemOut(
+            requirement_id=item["requirement_id"],
+            station_id=item["station_id"],
+            station_name=item["station_name"],
+            item_code=item["item_code"],
+            item_name=item["item_name"],
+            minimum_quantity=item["minimum_quantity"],
+            unit=item["unit"],
+            current_stock=item["current_stock"],
+            surplus_deficit=item["surplus_deficit"],
+            burn_rate_value=item["burn_rate_value"],
+            burn_rate_text=item["burn_rate_text"],
+            trend=item["trend"],
+            trend_pct=item["trend_pct"],
+            days_remaining=item["days_remaining"],
+            days_to_minimum=item["days_to_minimum"],
+            forecast_status=item["forecast_status"],
+            risk_score=item["risk_score"],
+            risk_level=item["risk_level"],
+            risk_factors=item["risk_factors"],
+            why_flagged=item["why_flagged"],
+            consumption_record_count=item["consumption_record_count"],
+            has_sufficient_history=item["has_sufficient_history"],
+        ))
+
+    # Sort: URGENT/CRITICAL first, then by risk_score desc
+    priority_order = {"URGENT": 0, "CRITICAL": 1, "LOW": 2, "NORMAL": 3}
+    results.sort(key=lambda x: (priority_order.get(x.risk_level, 9), -x.risk_score))
+    return results
 
 @router.get("", response_model=List[schemas.InventoryOut])
 def read_inventory_list(

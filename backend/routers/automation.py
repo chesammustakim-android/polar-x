@@ -137,15 +137,25 @@ def get_expedition_readiness_analysis(db: Session = Depends(get_db)):
 def get_inventory_risk_analysis(db: Session = Depends(get_db)):
     """
     Evaluates inventory stockout vulnerability using burn rates, available buffer ratios,
-    and lead-time risk metrics.
+    and lead-time risk metrics. Enriched with real station burn rate and consumption trend
+    data from DailyConsumptionRecord when StationResourceRequirement exists for an item.
     """
     items = db.query(models.Inventory).all()
     results = []
 
+    # Build station intelligence lookup keyed by item_code for fast enrichment
+    station_intel_raw = crud.get_station_resource_intelligence(db, station_id=None)
+    # If multiple stations have the same item_code, use the highest-risk entry
+    intel_by_code: dict = {}
+    for si in station_intel_raw:
+        code = si["item_code"]
+        if code not in intel_by_code or si["risk_score"] > intel_by_code[code]["risk_score"]:
+            intel_by_code[code] = si
+
     for item in items:
         factors = []
         deficit = max(0.0, item.minimum_quantity - item.quantity)
-        
+
         # Base risk calculation
         risk_score = 10.0
 
@@ -213,8 +223,70 @@ def get_inventory_risk_analysis(db: Session = Depends(get_db)):
                 description=f"{item.category} supplies have elevated operational criticality in polar winter."
             ))
 
+        # Factor 4: Station intelligence enrichment (burn rate & trend from real records)
+        si = intel_by_code.get(item.item_code)
+        station_name = None
+        burn_rate_text = None
+        trend = None
+        days_to_minimum = None
+        forecast_status = None
+        why_flagged = []
+
+        if si:
+            station_name = si["station_name"]
+            burn_rate_text = si["burn_rate_text"]
+            trend = si["trend"]
+            days_to_minimum = si["days_to_minimum"]
+            forecast_status = si["forecast_status"]
+            why_flagged = si["why_flagged"]
+
+            if si["has_sufficient_history"] and si["burn_rate_value"]:
+                factors.append(schemas.ContributingFactor(
+                    name="Real Station Burn Rate",
+                    weight=5.0,
+                    impact="NEUTRAL",
+                    description=f"Station '{station_name}': {si['burn_rate_text']} (from {si['consumption_record_count']} actual consumption records)."
+                ))
+            else:
+                factors.append(schemas.ContributingFactor(
+                    name="Burn Rate Data",
+                    weight=0.0,
+                    impact="NEUTRAL",
+                    description=f"Station '{station_name}': {si['burn_rate_text']}."
+                ))
+
+            if trend == "INCREASING":
+                risk_score += 8.0
+                factors.append(schemas.ContributingFactor(
+                    name="Rising Consumption Trend",
+                    weight=8.0,
+                    impact="NEGATIVE",
+                    description=f"Consumption is trending upward ({si.get('trend_pct', 0):+.1f}% vs prior period)."
+                ))
+            elif trend == "DECREASING":
+                factors.append(schemas.ContributingFactor(
+                    name="Declining Consumption Trend",
+                    weight=-5.0,
+                    impact="POSITIVE",
+                    description=f"Consumption is trending downward ({si.get('trend_pct', 0):+.1f}% vs prior period)."
+                ))
+
+            if days_to_minimum is not None and days_to_minimum < 14 and days_to_minimum > 0:
+                risk_score += 15.0
+                factors.append(schemas.ContributingFactor(
+                    name="Imminent Reserve Breach",
+                    weight=15.0,
+                    impact="NEGATIVE",
+                    description=f"Station '{station_name}' minimum reserve will be reached in {days_to_minimum} days."
+                ))
+        else:
+            why_flagged = [
+                "No station resource requirement configured for this item",
+                "Configure station requirements to enable burn rate and forecast analysis"
+            ]
+
         final_risk = round(min(100.0, max(0.0, risk_score)), 1)
-        
+
         crit_thresh = crud.get_setting_value(db, "automation_inventory_risk_critical_threshold", 75)
         high_thresh = crud.get_setting_value(db, "automation_inventory_risk_high_threshold", 50)
 
@@ -231,9 +303,13 @@ def get_inventory_risk_analysis(db: Session = Depends(get_db)):
             risk_level = "LOW"
             recommended_action = "Nominal stock buffer. No immediate procurement action required."
 
+        station_intel_str = ""
+        if si and si["has_sufficient_history"]:
+            station_intel_str = f" Burn rate: {si['burn_rate_text']}. Trend: {trend}."
+
         explanation = (
             f"Inventory item {item.item_code} evaluated at {final_risk}% risk ({risk_level}) "
-            f"due to {item.quantity}/{item.minimum_quantity} {item.unit} available stock and {days} days runway."
+            f"due to {item.quantity}/{item.minimum_quantity} {item.unit} available stock and {days} days runway.{station_intel_str}"
         )
 
         results.append(schemas.InventoryRiskItemOut(
@@ -250,7 +326,13 @@ def get_inventory_risk_analysis(db: Session = Depends(get_db)):
             risk_level=risk_level,
             factors=factors,
             explanation=explanation,
-            recommended_action=recommended_action
+            recommended_action=recommended_action,
+            station_name=station_name,
+            burn_rate_text=burn_rate_text,
+            trend=trend,
+            days_to_minimum=days_to_minimum,
+            forecast_status=forecast_status,
+            why_flagged=why_flagged,
         ))
 
     # Sort highest risk first

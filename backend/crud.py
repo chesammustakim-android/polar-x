@@ -2082,6 +2082,236 @@ def get_station_consumption_history(db: Session, station_id: int, start_date: st
     ).limit(limit).all()
 
 
+def get_station_resource_intelligence(db: Session, station_id: int = None):
+    """
+    For each active StationResourceRequirement (filtered by station_id if provided),
+    compute deterministic burn rate, consumption trend, days-remaining, and risk
+    from real DailyConsumptionRecord data.
+
+    Burn rate: 7-day average from actual records. Requires >= 3 records.
+    Trend: deterministic comparison of recent 7-day avg vs prior 7-day avg.
+    Days remaining: (current_stock - min_required) / burn_rate.
+    Risk: NORMAL / LOW / CRITICAL / URGENT from existing Settings thresholds.
+
+    Returns list of dicts (one per requirement row).
+    """
+    from datetime import datetime, timedelta
+
+    # Fetch settings thresholds
+    crit_thresh = get_setting_value(db, "automation_inventory_risk_critical_threshold", 75)
+    high_thresh = get_setting_value(db, "automation_inventory_risk_high_threshold", 50)
+    inv_crit_ratio = get_setting_value(db, "inventory_critical_ratio", 1.0)
+    inv_low_ratio = get_setting_value(db, "inventory_low_stock_ratio", 1.5)
+
+    # Query station requirements
+    query = db.query(models.StationResourceRequirement).filter(
+        models.StationResourceRequirement.is_active == True
+    )
+    if station_id is not None:
+        query = query.filter(models.StationResourceRequirement.station_id == station_id)
+
+    requirements = query.order_by(
+        models.StationResourceRequirement.station_id,
+        models.StationResourceRequirement.item_code
+    ).all()
+
+    today = datetime.utcnow().date()
+    results = []
+
+    for req in requirements:
+        station = get_station(db, req.station_id)
+        station_name = station.name if station else f"Station #{req.station_id}"
+
+        # Find matching inventory item by item_code
+        inv = db.query(models.Inventory).filter(
+            models.Inventory.item_code == req.item_code
+        ).first()
+
+        current_stock = inv.quantity if inv else None
+        inv_unit = inv.unit if inv else req.unit
+
+        # Fetch last 14 days of consumption records for burn-rate + trend
+        cutoff_14 = (today - timedelta(days=14)).isoformat()
+        records_14 = db.query(models.DailyConsumptionRecord).filter(
+            models.DailyConsumptionRecord.station_id == req.station_id,
+            models.DailyConsumptionRecord.item_code == req.item_code,
+            models.DailyConsumptionRecord.consumption_date >= cutoff_14
+        ).order_by(models.DailyConsumptionRecord.consumption_date.desc()).all()
+
+        # Split into recent (last 7 days) and prior (previous 7 days)
+        cutoff_7 = (today - timedelta(days=7)).isoformat()
+        recent_records = [r for r in records_14 if r.consumption_date > cutoff_7]
+        prior_records = [r for r in records_14 if r.consumption_date <= cutoff_7]
+
+        total_records = len(records_14)
+
+        # Burn rate calculation (7-day average)
+        if total_records >= 3:
+            if recent_records:
+                recent_avg = sum(r.consumed_quantity for r in recent_records) / len(recent_records)
+            else:
+                recent_avg = sum(r.consumed_quantity for r in records_14[:7]) / min(7, len(records_14))
+
+            burn_rate_value = round(recent_avg, 2)
+            display_burn = int(burn_rate_value) if burn_rate_value == int(burn_rate_value) else burn_rate_value
+            burn_rate_text = f"{display_burn} {inv_unit}/day"
+            has_burn_rate = True
+        else:
+            burn_rate_value = None
+            burn_rate_text = "Insufficient consumption history"
+            has_burn_rate = False
+
+        # Trend calculation
+        if total_records >= 3 and recent_records and prior_records:
+            recent_avg_for_trend = sum(r.consumed_quantity for r in recent_records) / len(recent_records)
+            prior_avg_for_trend = sum(r.consumed_quantity for r in prior_records) / len(prior_records)
+            if prior_avg_for_trend > 0:
+                pct_change = (recent_avg_for_trend - prior_avg_for_trend) / prior_avg_for_trend * 100
+                if pct_change > 10:
+                    trend = "INCREASING"
+                elif pct_change < -10:
+                    trend = "DECREASING"
+                else:
+                    trend = "STABLE"
+                trend_pct = round(pct_change, 1)
+            else:
+                trend = "STABLE"
+                trend_pct = 0.0
+        else:
+            trend = "INSUFFICIENT DATA"
+            trend_pct = None
+
+        # Days remaining and days to minimum
+        min_qty = req.minimum_quantity
+        if current_stock is None:
+            days_remaining = None
+            days_to_minimum = None
+            forecast_status = "Stock data unavailable"
+        elif current_stock <= min_qty:
+            days_remaining = 0
+            days_to_minimum = 0
+            forecast_status = "Already below minimum"
+        elif has_burn_rate and burn_rate_value and burn_rate_value > 0:
+            days_remaining = round(current_stock / burn_rate_value)
+            days_to_minimum = round((current_stock - min_qty) / burn_rate_value)
+            forecast_status = f"{days_to_minimum} days until reserve breach"
+        elif has_burn_rate and burn_rate_value == 0:
+            days_remaining = None
+            days_to_minimum = None
+            forecast_status = "No recent consumption"
+        else:
+            days_remaining = None
+            days_to_minimum = None
+            forecast_status = "Forecast unavailable"
+
+        # Risk score & level
+        risk_score = 10.0
+        risk_factors = []
+
+        if current_stock is not None and min_qty > 0:
+            ratio = current_stock / min_qty
+            if ratio <= 0:
+                risk_score += 65.0
+                risk_factors.append("Stock fully depleted")
+            elif ratio < inv_crit_ratio:
+                risk_score += 45.0
+                risk_factors.append(f"Stock at {round(ratio * 100, 1)}% of minimum (Critical Reserve Breach)")
+            elif ratio < inv_low_ratio:
+                risk_score += 20.0
+                risk_factors.append(f"Stock at {round(ratio * 100, 1)}% of minimum (Low Reserve)")
+
+        if days_to_minimum is not None and days_to_minimum == 0:
+            risk_score += 30.0
+            risk_factors.append("Already below minimum reserve")
+        elif days_to_minimum is not None and days_to_minimum < 14:
+            risk_score += 20.0
+            risk_factors.append(f"Reserve breach in {days_to_minimum} days")
+        elif days_to_minimum is not None and days_to_minimum < 30:
+            risk_score += 10.0
+            risk_factors.append(f"Reserve breach in {days_to_minimum} days")
+
+        if trend == "INCREASING" and has_burn_rate:
+            risk_score += 10.0
+            risk_factors.append("Consumption trend is increasing")
+
+        if req.item_code.startswith("FUEL") or req.item_code.startswith("MED"):
+            risk_score += 8.0
+            risk_factors.append("Life-support category resource")
+
+        final_risk = round(min(100.0, max(0.0, risk_score)), 1)
+
+        # 4-tier risk classification: NORMAL / LOW / CRITICAL / URGENT
+        if (current_stock is not None and current_stock <= min_qty) or (days_to_minimum is not None and days_to_minimum <= 7):
+            risk_level = "URGENT"
+        elif final_risk >= crit_thresh or (days_to_minimum is not None and days_to_minimum <= 14):
+            risk_level = "CRITICAL"
+        elif final_risk >= high_thresh or (days_to_minimum is not None and days_to_minimum <= 30):
+            risk_level = "LOW"
+        else:
+            risk_level = "NORMAL"
+
+        # Build explainability WHY_FLAGGED list
+        why_flagged = []
+        if current_stock is not None and current_stock <= min_qty:
+            why_flagged.append("Current stock is at or below minimum reserve")
+        elif current_stock is not None and min_qty > 0 and (current_stock / min_qty) < 1.5:
+            why_flagged.append(f"Current stock buffer is low ({round(current_stock, 1)} / {round(min_qty, 1)} {inv_unit})")
+
+        if has_burn_rate and burn_rate_value and burn_rate_value > 0:
+            why_flagged.append(f"Recent burn rate is {display_burn} {inv_unit}/day")
+        elif not has_burn_rate:
+            why_flagged.append("Insufficient consumption history")
+
+        if trend == "INCREASING":
+            why_flagged.append("Consumption trend is increasing")
+        elif trend == "DECREASING":
+            why_flagged.append("Consumption trend is decreasing")
+        elif trend == "STABLE":
+            why_flagged.append("Consumption trend is stable")
+
+        if days_to_minimum is not None:
+            if days_to_minimum == 0:
+                why_flagged.append("Reserve is already breached — immediate replenishment required")
+            elif days_to_minimum <= 14:
+                why_flagged.append(f"Projected reserve breach in {days_to_minimum} days")
+            elif days_to_minimum <= 30:
+                why_flagged.append(f"Projected reserve is below minimum within {days_to_minimum} days")
+
+        if not why_flagged:
+            why_flagged.append("Nominal operational telemetry — stock above minimum requirements")
+
+        surplus_deficit = None
+        if current_stock is not None:
+            surplus_deficit = round(current_stock - min_qty, 2)
+
+        results.append({
+            "requirement_id": req.id,
+            "station_id": req.station_id,
+            "station_name": station_name,
+            "item_code": req.item_code,
+            "item_name": req.item_name or (inv.item_name if inv else req.item_code),
+            "minimum_quantity": min_qty,
+            "unit": inv_unit,
+            "current_stock": current_stock,
+            "surplus_deficit": surplus_deficit,
+            "burn_rate_value": burn_rate_value,
+            "burn_rate_text": burn_rate_text,
+            "trend": trend,
+            "trend_pct": trend_pct,
+            "days_remaining": days_remaining,
+            "days_to_minimum": days_to_minimum,
+            "forecast_status": forecast_status,
+            "risk_score": final_risk,
+            "risk_level": risk_level,
+            "risk_factors": risk_factors,
+            "why_flagged": why_flagged,
+            "consumption_record_count": total_records,
+            "has_sufficient_history": total_records >= 3,
+        })
+
+    return results
+
+
 # --- DASHBOARD AGGREGATION ---
 def get_dashboard_summary(db: Session):
     active_expeditions = db.query(models.Expedition).filter(models.Expedition.status == "Active").count()

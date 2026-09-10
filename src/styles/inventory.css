@@ -351,9 +351,23 @@
 
 .inventory-table {
   width: 100%;
-  min-width: 980px;
+  min-width: 1060px;
   border-collapse: collapse;
   font-size: 12.5px;
+}
+
+.inventory-col-updated-th {
+  min-width: 140px;
+  white-space: nowrap;
+}
+
+.inventory-col-updated {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 140px;
+  letter-spacing: -0.2px;
 }
 
 .inventory-table thead th {
@@ -787,3 +801,53 @@
   background: rgba(239, 68, 68, 0.15);
   color: var(--hazard-red);
 }
+
+/* ─── STATION REQUIREMENTS VIEW (PASS 2) ───────────────────────── */
+.station-context-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.station-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid var(--cyan-400);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  font-family: var(--font-mono);
+}
+
+.req-explain-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  color: var(--cyan-300);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.req-explain-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: var(--cyan-400);
+  color: #fff;
+}
+

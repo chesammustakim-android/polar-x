@@ -349,6 +349,17 @@ export const api = {
     }
   },
 
+  async getStationInventoryIntelligence(stationId = null) {
+    try {
+      const qs = stationId ? `?station_id=${stationId}` : '';
+      const res = await authFetch(`${BASE_URL}/api/inventory/station-intelligence${qs}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn('[POLAR-X API] Failed to fetch station inventory intelligence:', err.message);
+      return [];
+    }
+  },
+
   // Personnel Management & Movement Tracking
   async getPersonnel(filters = {}) {
     try {

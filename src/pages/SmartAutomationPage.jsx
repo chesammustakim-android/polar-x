@@ -17,10 +17,14 @@ import {
   Radio,
   Zap,
   ChevronRight,
-  Info
+  Info,
+  Eye,
+  Building,
+  MapPin
 } from 'lucide-react';
 import { api } from '../services/api';
 import StatusBadge from '../components/common/StatusBadge';
+import QuickModal from '../components/common/QuickModal';
 
 export default function SmartAutomationPage() {
   const [activeTab, setActiveTab] = useState('overview'); // overview, expeditions, inventory, cargo, personnel, emergency
@@ -37,6 +41,7 @@ export default function SmartAutomationPage() {
   const [emergencyQueue, setEmergencyQueue] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [actionFeedback, setActionFeedback] = useState(null);
+  const [selectedExplainInv, setSelectedExplainInv] = useState(null);
 
   // Load all analysis from backend
   const runLiveAnalysis = async (isManual = false) => {
@@ -574,54 +579,68 @@ export default function SmartAutomationPage() {
               <thead>
                 <tr>
                   <th>Item Code</th>
-                  <th>Description</th>
-                  <th>Category</th>
-                  <th>Available / Min</th>
-                  <th>Days Runway</th>
+                  <th>Resource</th>
+                  <th>Station</th>
+                  <th>Stock vs Min</th>
+                  <th>Burn Rate (7d)</th>
+                  <th>Trend</th>
+                  <th>Forecast / Runway</th>
                   <th>Risk Score</th>
-                  <th>Contributing Factors</th>
-                  <th>Recommended Replenishment Action</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {inventoryRisks.map(inv => (
-                  <tr key={inv.inventory_id}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--cyan-300)' }}>
-                      {inv.item_code}
-                    </td>
-                    <td style={{ color: '#fff', fontWeight: '600' }}>
-                      {inv.item_name}
-                      <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{inv.location}</div>
-                    </td>
-                    <td>
-                      <span className="mono-badge">{inv.category}</span>
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)' }}>
-                      <span style={{ color: inv.quantity <= inv.minimum_quantity ? 'var(--hazard-red)' : '#fff', fontWeight: '700' }}>
-                        {inv.quantity} {inv.unit}
-                      </span>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}> / {inv.minimum_quantity} {inv.unit}</span>
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-mono)', color: inv.days_remaining < 30 ? 'var(--hazard-red)' : '#fff' }}>
-                      {inv.days_remaining} Days
-                    </td>
-                    <td>
-                      <span className={`status-badge ${getLevelBadgeClass(inv.risk_level)}`}>
-                        {inv.risk_level} ({inv.risk_score}%)
-                      </span>
-                    </td>
-                    <td style={{ maxWidth: '200px' }}>
-                      {inv.factors.slice(0, 2).map((f, fIdx) => (
-                        <div key={fIdx} style={{ fontSize: '10.5px', color: 'var(--text-secondary)', marginBottom: '2px' }}>
-                          • {f.name}
+                {inventoryRisks.map(inv => {
+                  const isBreached = inv.quantity <= inv.minimum_quantity;
+                  return (
+                    <tr key={inv.inventory_id} onClick={() => setSelectedExplainInv(inv)} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--cyan-300)' }}>
+                        {inv.item_code}
+                      </td>
+                      <td style={{ color: '#fff', fontWeight: '600' }}>
+                        {inv.item_name}
+                        <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{inv.category} • {inv.location}</div>
+                      </td>
+                      <td style={{ color: 'var(--cyan-300)', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Building size={12} style={{ color: 'var(--cyan-400)' }} />
+                          {inv.station_name || 'Expedition Central Depot'}
                         </div>
-                      ))}
-                    </td>
-                    <td style={{ fontSize: '11px', color: 'var(--cyan-300)', maxWidth: '240px' }}>
-                      {inv.recommended_action}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)' }}>
+                        <span style={{ color: isBreached ? 'var(--hazard-red)' : '#fff', fontWeight: '700' }}>
+                          {inv.quantity} {inv.unit}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}> / {inv.minimum_quantity} {inv.unit}</span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: inv.burn_rate_text && !inv.burn_rate_text.includes('Insufficient') ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
+                        {inv.burn_rate_text || 'Insufficient history'}
+                      </td>
+                      <td>
+                        <span className={`status-badge ${inv.trend === 'INCREASING' ? 'badge-danger' : inv.trend === 'DECREASING' ? 'badge-success' : inv.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
+                          {inv.trend || 'INSUFFICIENT DATA'}
+                        </span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: inv.days_to_minimum !== null && inv.days_to_minimum < 14 ? 'var(--hazard-red)' : 'var(--text-secondary)' }}>
+                        {inv.forecast_status || (inv.days_remaining ? `${inv.days_remaining} Days runway` : 'Forecast unavailable')}
+                      </td>
+                      <td>
+                        <span className={`status-badge ${getLevelBadgeClass(inv.risk_level)}`}>
+                          {inv.risk_level} ({inv.risk_score}%)
+                        </span>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <button
+                          className="req-explain-btn"
+                          onClick={() => setSelectedExplainInv(inv)}
+                          title="View explainable contributing factors"
+                        >
+                          <Eye size={12} /> Explain
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -889,6 +908,120 @@ export default function SmartAutomationPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ─── RESOURCE RISK EXPLAINABILITY MODAL (PASS 2) ─── */}
+      {selectedExplainInv && (
+        <QuickModal
+          isOpen={true}
+          onClose={() => setSelectedExplainInv(null)}
+          title={`Resource Risk Analysis — ${selectedExplainInv.item_name} (${selectedExplainInv.item_code})`}
+          footerButtons={
+            <button className="btn-secondary" onClick={() => setSelectedExplainInv(null)}>
+              Close Analysis
+            </button>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Header Telemetry */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gap: '10px',
+              background: 'rgba(15,23,42,0.6)',
+              padding: '12px',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-subtle)'
+            }}>
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>POLAR FACILITY / DEPOT</div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#fff', marginTop: '2px' }}>
+                  {selectedExplainInv.station_name || selectedExplainInv.location || 'Central Depot'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>CURRENT STOCK</div>
+                <div style={{
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  color: selectedExplainInv.quantity <= selectedExplainInv.minimum_quantity ? 'var(--hazard-red)' : '#fff',
+                  marginTop: '2px'
+                }}>
+                  {selectedExplainInv.quantity} {selectedExplainInv.unit}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>SAFETY MINIMUM</div>
+                <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--cyan-300)', marginTop: '2px' }}>
+                  {selectedExplainInv.minimum_quantity} {selectedExplainInv.unit}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>OPERATIONAL RISK</div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: getLevelBadgeClass(selectedExplainInv.risk_level) === 'badge-danger' ? 'var(--hazard-red)' : 'var(--cyan-300)', marginTop: '2px' }}>
+                  {selectedExplainInv.risk_level} ({selectedExplainInv.risk_score}%)
+                </div>
+              </div>
+            </div>
+
+            {/* Burn Rate and Trend */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>RECENT BURN RATE</div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: selectedExplainInv.burn_rate_text && !selectedExplainInv.burn_rate_text.includes('Insufficient') ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
+                  {selectedExplainInv.burn_rate_text || 'Insufficient consumption history'}
+                </div>
+              </div>
+              <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>CONSUMPTION TREND</div>
+                <span className={`status-badge ${selectedExplainInv.trend === 'INCREASING' ? 'badge-danger' : selectedExplainInv.trend === 'DECREASING' ? 'badge-success' : selectedExplainInv.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
+                  {selectedExplainInv.trend || 'INSUFFICIENT DATA'}
+                </span>
+              </div>
+            </div>
+
+            {/* WHY THIS WAS FLAGGED */}
+            <div style={{ border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.04)', borderRadius: 'var(--radius-md)', padding: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--hazard-red)', fontFamily: 'var(--font-mono)', letterSpacing: '0.8px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertTriangle size={13} />
+                WHY THIS WAS FLAGGED
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {selectedExplainInv.why_flagged && selectedExplainInv.why_flagged.length > 0 ? (
+                  selectedExplainInv.why_flagged.map((f, fIdx) => (
+                    <li key={fIdx} style={{ fontSize: '11.5px', color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                      {f}
+                    </li>
+                  ))
+                ) : selectedExplainInv.factors && selectedExplainInv.factors.length > 0 ? (
+                  selectedExplainInv.factors.map((f, fIdx) => (
+                    <li key={fIdx} style={{ fontSize: '11.5px', color: 'var(--text-primary)', lineHeight: '1.4' }}>
+                      {f.description || f.name}
+                    </li>
+                  ))
+                ) : (
+                  <li style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                    Buffer within nominal parameters.
+                  </li>
+                )}
+              </ul>
+            </div>
+
+            {/* Recommended Replenishment Action */}
+            <div style={{ padding: '12px', background: 'rgba(56,189,248,0.05)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56,189,248,0.2)' }}>
+              <div style={{ fontSize: '10px', color: 'var(--cyan-300)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
+                RECOMMENDED OPERATIONAL ACTION
+              </div>
+              <div style={{ fontSize: '12px', color: '#fff', lineHeight: '1.4' }}>
+                {selectedExplainInv.recommended_action}
+              </div>
+            </div>
+
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px' }}>
+              • Deterministic calculation based on active database telemetry. No machine learning or artificial intelligence claims.
+            </div>
+          </div>
+        </QuickModal>
       )}
     </div>
   );
