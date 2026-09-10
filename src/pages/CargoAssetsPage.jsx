@@ -659,7 +659,7 @@ function AddCargoModal({ onClose, onCreated }) {
 }
 
 // ─── Main: CargoAssetsPage ────────────────────────────────────────────────────
-export default function CargoAssetsPage({ initialExpeditionId }) {
+export default function CargoAssetsPage({ initialExpeditionId, initialCargoId, onSelectCargo }) {
   const [cargoList, setCargoList]       = useState([]);
   const [stats, setStats]               = useState(null);
   const [loading, setLoading]           = useState(true);
@@ -667,7 +667,7 @@ export default function CargoAssetsPage({ initialExpeditionId }) {
   const [filterStatus, setFilterStatus] = useState('ALL');
   const [filterPriority, setFilterPriority] = useState('ALL');
   const [filterExpId, setFilterExpId]   = useState(initialExpeditionId || null);
-  const [selectedCargoId, setSelectedCargoId] = useState(null);
+  const [selectedCargoId, setSelectedCargoId] = useState(initialCargoId || null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeStatFilter, setActiveStatFilter] = useState(null);
 

@@ -1,9 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import StatusBadge from '../common/StatusBadge';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-
 
 // Fix default Leaflet icon assets
 delete L.Icon.Default.prototype._getIconUrl;
@@ -81,13 +80,52 @@ function createCargoIcon(priority, isSelected) {
   });
 }
 
-// Controller component to smoothly fly map to selected coordinates
-function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoom }) {
+function createIncidentIcon(severity, isSelected) {
+  const sev = (severity || '').toUpperCase();
+  const iconCls = sev === 'CRITICAL' ? 'incident-critical' : 'incident-normal';
+  return L.divIcon({
+    className: 'custom-div-icon',
+    html: `<div class="map-marker-pin map-marker-incident ${isSelected ? 'selected-marker' : ''}"><div class="${iconCls}">${sev}</div></div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+    popupAnchor: [0, -18]
+  });
+}
+
+function createUnitIcon(unitCode, isSelected) {
+  return L.divIcon({
+    className: 'custom-div-icon',
+    html: `<div class="map-marker-pin map-marker-unit ${isSelected ? 'selected-marker' : ''}">${unitCode || 'SAR'}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
+  });
+}
+
+function createClusterIcon(count, hasEmergency) {
+  const emergCls = hasEmergency ? ' has-emergency' : '';
+  return L.divIcon({
+    className: 'custom-div-icon',
+    html: `<div class="map-marker-cluster${emergCls}" title="Cluster: ${count} assets. Click to spiderfy/expand."><span class="cluster-count">${count}</span></div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -20]
+  });
+}
+
+// Map Controller for smooth fly-to and zoom event tracking
+function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoom, onZoomChange }) {
   const map = useMap();
+
+  useMapEvents({
+    zoomend: () => {
+      if (onZoomChange) onZoomChange(map.getZoom());
+    }
+  });
 
   useEffect(() => {
     if (selectedEntity && selectedEntity.latitude != null && selectedEntity.longitude != null) {
-      map.flyTo([selectedEntity.latitude, selectedEntity.longitude], 7, {
+      map.flyTo([selectedEntity.latitude, selectedEntity.longitude], Math.max(map.getZoom(), 7), {
         duration: 1.2,
         easeLinearity: 0.25
       });
@@ -105,6 +143,45 @@ function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoo
   return null;
 }
 
+// Cluster grouping helper by geographic proximity
+function groupMarkersIntoClusters(items, threshold = 0.05) {
+  const clusters = [];
+  items.forEach(item => {
+    if (item.latitude == null || item.longitude == null || isNaN(item.latitude) || isNaN(item.longitude)) return;
+    
+    // Check if item belongs to an existing cluster
+    const match = clusters.find(c => {
+      const dLat = Math.abs(c.latitude - item.latitude);
+      const dLon = Math.abs(c.longitude - item.longitude);
+      return Math.hypot(dLat, dLon) < threshold;
+    });
+
+    if (match) {
+      match.items.push(item);
+    } else {
+      clusters.push({
+        id: `cluster-${item.type}-${item.id}-${clusters.length}`,
+        latitude: item.latitude,
+        longitude: item.longitude,
+        items: [item]
+      });
+    }
+  });
+  return clusters;
+}
+
+// Spiderfy radial position calculator
+function getSpiderPosition(centerLat, centerLon, index, total, zoom = 4) {
+  if (total <= 1) return [centerLat, centerLon];
+  const angle = (index * 2 * Math.PI) / total;
+  // Scaled radius adapted to zoom level so spiderfied markers are distinctly separated
+  const baseRadius = 0.45 / Math.pow(1.4, Math.max(1, zoom - 3));
+  const latOffset = baseRadius * Math.sin(angle);
+  const cosLat = Math.cos((centerLat * Math.PI) / 180) || 1;
+  const lonOffset = (baseRadius / Math.max(0.2, Math.abs(cosLat))) * Math.cos(angle);
+  return [centerLat + latOffset, centerLon + lonOffset];
+}
+
 export default function PolarMap({
   personnel = [],
   stations = [],
@@ -120,41 +197,296 @@ export default function PolarMap({
   emergencyOnly = false,
   resetTrigger = 0
 }) {
-  // Default centered on Indian Antarctic Research Stations (Maitri / Queen Maud Land)
   const defaultCenter = [-70.7670, 11.7400];
   const defaultZoom = 4;
+  const [currentZoom, setCurrentZoom] = useState(defaultZoom);
+  const [expandedClusterIds, setExpandedClusterIds] = useState(new Set());
 
-  // Filter entities if emergency only
-  const filteredPersonnel = emergencyOnly
-    ? personnel.filter(p => (p.status || '').toUpperCase() === 'EMERGENCY')
-    : personnel;
+  // Filter entities based on layer toggles
+  const filteredPersonnel = useMemo(() => {
+    if (!showPersonnel) return [];
+    return emergencyOnly
+      ? personnel.filter(p => (p.status || '').toUpperCase() === 'EMERGENCY')
+      : personnel;
+  }, [personnel, showPersonnel, emergencyOnly]);
 
-  // Filter incidents: optional emergencyOnly could also filter by severity if needed
-  const filteredIncidents = emergencyOnly
-    ? incidents.filter(i => (i.severity || '').toUpperCase() === 'CRITICAL')
-    : incidents;
+  const filteredCargo = useMemo(() => {
+    if (!showCargo || emergencyOnly) return [];
+    return cargo;
+  }, [cargo, showCargo, emergencyOnly]);
 
-  // Filter response units: show all, but could filter by status if needed in future
-  const filteredResponseUnits = responseUnits;
+  const filteredStations = useMemo(() => {
+    if (!showStations || emergencyOnly) return [];
+    return stations;
+  }, [stations, showStations, emergencyOnly]);
+
+  const filteredIncidents = useMemo(() => {
+    return emergencyOnly
+      ? incidents.filter(i => (i.severity || '').toUpperCase() === 'CRITICAL')
+      : incidents;
+  }, [incidents, emergencyOnly]);
+
+  const filteredResponseUnits = useMemo(() => {
+    return responseUnits;
+  }, [responseUnits]);
+
+  // Aggregate all visible entity items with normalized type tags
+  const allVisibleEntities = useMemo(() => {
+    const list = [];
+    filteredStations.forEach(st => list.push({ ...st, entityType: 'station', type: 'station' }));
+    filteredPersonnel.forEach(p => list.push({ ...p, entityType: 'personnel', type: 'personnel' }));
+    filteredCargo.forEach(c => list.push({ ...c, entityType: 'cargo', type: 'cargo' }));
+    filteredIncidents.forEach(inc => list.push({ ...inc, entityType: 'incident', type: 'incident' }));
+    filteredResponseUnits.forEach(u => list.push({ ...u, entityType: 'response_unit', type: 'response_unit' }));
+    return list;
+  }, [filteredStations, filteredPersonnel, filteredCargo, filteredIncidents, filteredResponseUnits]);
+
+  // Group entities into proximity clusters
+  const clusters = useMemo(() => {
+    return groupMarkersIntoClusters(allVisibleEntities, 0.05);
+  }, [allVisibleEntities]);
+
+  // Auto-expand cluster if selectedEntity is inside it
+  useEffect(() => {
+    if (selectedEntity) {
+      clusters.forEach(c => {
+        if (c.items.some(it => it.id === selectedEntity.id && it.type === selectedEntity.type)) {
+          setExpandedClusterIds(prev => new Set([...prev, c.id]));
+        }
+      });
+    }
+  }, [selectedEntity, clusters]);
+
+  const toggleClusterExpansion = (clusterId) => {
+    setExpandedClusterIds(prev => {
+      const next = new Set(prev);
+      if (next.has(clusterId)) next.delete(clusterId);
+      else next.add(clusterId);
+      return next;
+    });
+  };
 
   // Build movement polyline points if selected personnel has historical coordinates
-  const polylineCoords = [];
-  if (selectedEntity && selectedEntity.type === 'personnel' && movementHistory.length > 0) {
-    // Reverse movement history so it goes chronologically (oldest -> newest)
-    const sorted = [...movementHistory].reverse();
-    sorted.forEach(m => {
-      if (m.new_latitude != null && m.new_longitude != null && !isNaN(m.new_latitude) && !isNaN(m.new_longitude)) {
-        polylineCoords.push([m.new_latitude, m.new_longitude]);
-      }
-    });
-    // Append current position if available
-    if (selectedEntity.latitude != null && selectedEntity.longitude != null) {
-      const lastPoint = polylineCoords[polylineCoords.length - 1];
-      if (!lastPoint || lastPoint[0] !== selectedEntity.latitude || lastPoint[1] !== selectedEntity.longitude) {
-        polylineCoords.push([selectedEntity.latitude, selectedEntity.longitude]);
+  const polylineCoords = useMemo(() => {
+    const coords = [];
+    if (selectedEntity && selectedEntity.type === 'personnel' && movementHistory.length > 0) {
+      const sorted = [...movementHistory].reverse();
+      sorted.forEach(m => {
+        if (m.new_latitude != null && m.new_longitude != null && !isNaN(m.new_latitude) && !isNaN(m.new_longitude)) {
+          coords.push([m.new_latitude, m.new_longitude]);
+        }
+      });
+      if (selectedEntity.latitude != null && selectedEntity.longitude != null) {
+        const lastPoint = coords[coords.length - 1];
+        if (!lastPoint || lastPoint[0] !== selectedEntity.latitude || lastPoint[1] !== selectedEntity.longitude) {
+          coords.push([selectedEntity.latitude, selectedEntity.longitude]);
+        }
       }
     }
-  }
+    return coords;
+  }, [selectedEntity, movementHistory]);
+
+  // Helper to render individual item marker
+  const renderItemMarker = (item, position, isSpiderfied = false) => {
+    const isSelected = selectedEntity && selectedEntity.id === item.id && selectedEntity.type === item.type;
+    const pos = position || [item.latitude, item.longitude];
+
+    switch (item.type) {
+      case 'station':
+        return (
+          <Marker
+            key={`st-${item.id}-${isSpiderfied ? 'spider' : 'solo'}`}
+            position={pos}
+            icon={createStationIcon(item.type, isSelected)}
+            eventHandlers={{
+              click: () => onSelectEntity && onSelectEntity({ ...item, type: 'station' })
+            }}
+          >
+            <Popup>
+              <div className="map-popup-card">
+                <div className="map-popup-header">
+                  <span className="map-popup-badge">STATION</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div>
+                  <div className="map-popup-name">{item.name}</div>
+                  <div className="map-popup-role">{item.station_type || item.type} • {item.elevation || 'Elevation ASL'}</div>
+                </div>
+                <div className="map-popup-coords">
+                  {formatPolarCoords(item.latitude, item.longitude)}
+                </div>
+                {item.description && (
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    {item.description}
+                  </div>
+                )}
+                <div className="map-popup-actions">
+                  <button
+                    className="map-popup-btn"
+                    onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'station' })}
+                  >
+                    Focus Station Dossier
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+
+      case 'personnel':
+        return (
+          <Marker
+            key={`ps-${item.id}-${isSpiderfied ? 'spider' : 'solo'}`}
+            position={pos}
+            icon={createPersonIcon(item.status, isSelected)}
+            eventHandlers={{
+              click: () => onSelectEntity && onSelectEntity({ ...item, type: 'personnel' })
+            }}
+          >
+            <Popup>
+              <div className="map-popup-card">
+                <div className="map-popup-header">
+                  <span className={`map-popup-badge ${(item.status || '').toUpperCase() === 'EMERGENCY' ? 'emergency' : ''}`}>
+                    {item.personnel_code}
+                  </span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div>
+                  <div className="map-popup-name">{item.name}</div>
+                  <div className="map-popup-role">{item.role} • {item.department}</div>
+                </div>
+                <div className="map-popup-row">
+                  <span className="map-popup-row-label">Location:</span>
+                  <span className="map-popup-row-val">{item.current_location}</span>
+                </div>
+                <div className="map-popup-coords">
+                  {formatPolarCoords(item.latitude, item.longitude)}
+                </div>
+                <div className="map-popup-actions">
+                  <button
+                    className="map-popup-btn"
+                    onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'personnel' })}
+                  >
+                    View Personnel Dossier
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+
+      case 'cargo':
+        return (
+          <Marker
+            key={`cg-${item.id}-${isSpiderfied ? 'spider' : 'solo'}`}
+            position={pos}
+            icon={createCargoIcon(item.priority, isSelected)}
+            eventHandlers={{
+              click: () => onSelectEntity && onSelectEntity({ ...item, type: 'cargo' })
+            }}
+          >
+            <Popup>
+              <div className="map-popup-card">
+                <div className="map-popup-header">
+                  <span className="map-popup-badge">{item.cargo_code}</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div>
+                  <div className="map-popup-name">{item.name}</div>
+                  <div className="map-popup-role">{item.category} • {item.weight}</div>
+                </div>
+                <div className="map-popup-row">
+                  <span className="map-popup-row-label">Location:</span>
+                  <span className="map-popup-row-val">{item.current_location}</span>
+                </div>
+                <div className="map-popup-coords">
+                  {formatPolarCoords(item.latitude, item.longitude)}
+                </div>
+                <div className="map-popup-actions">
+                  <button
+                    className="map-popup-btn"
+                    onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'cargo' })}
+                  >
+                    Inspect Cargo Telemetry
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+
+      case 'incident':
+        return (
+          <Marker
+            key={`inc-${item.id}-${isSpiderfied ? 'spider' : 'solo'}`}
+            position={pos}
+            icon={createIncidentIcon(item.severity, isSelected)}
+            eventHandlers={{
+              click: () => onSelectEntity && onSelectEntity({ ...item, type: 'incident' })
+            }}
+          >
+            <Popup>
+              <div className="map-popup-card">
+                <div className="map-popup-header">
+                  <span className="map-popup-badge">INCIDENT</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div className="map-popup-name">{item.title}</div>
+                <div className="map-popup-row">
+                  <span className="map-popup-row-label">Severity:</span>
+                  <span className="map-popup-row-val">{(item.severity || '').toUpperCase()}</span>
+                </div>
+                <div className="map-popup-coords">
+                  {formatPolarCoords(item.latitude, item.longitude)}
+                </div>
+                <div className="map-popup-actions">
+                  <button className="map-popup-btn" onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'incident' })}>
+                    Focus Incident
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+
+      case 'response_unit':
+        return (
+          <Marker
+            key={`unit-${item.id}-${isSpiderfied ? 'spider' : 'solo'}`}
+            position={pos}
+            icon={createUnitIcon(item.unit_code, isSelected)}
+            eventHandlers={{
+              click: () => onSelectEntity && onSelectEntity({ ...item, type: 'response_unit' })
+            }}
+          >
+            <Popup>
+              <div className="map-popup-card">
+                <div className="map-popup-header">
+                  <span className="map-popup-badge">UNIT</span>
+                  <StatusBadge status={item.status} />
+                </div>
+                <div className="map-popup-name">{item.unit_name || item.name || item.unit_code}</div>
+                <div className="map-popup-row">
+                  <span className="map-popup-row-label">Type:</span>
+                  <span className="map-popup-row-val">{item.unit_type}</span>
+                </div>
+                <div className="map-popup-coords">
+                  {formatPolarCoords(item.latitude, item.longitude)}
+                </div>
+                <div className="map-popup-actions">
+                  <button className="map-popup-btn" onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'response_unit' })}>
+                    Focus Unit
+                  </button>
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        );
+
+      default:
+        return null;
+    }
+  };
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -167,7 +499,7 @@ export default function PolarMap({
         zoomControl={true}
         attributionControl={false}
       >
-        {/* OpenStreetMap Tiles with Custom Dark Command-Center Filter */}
+        {/* Dark Command-Center Styled Map Tiles */}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           className="polar-map-tiles"
@@ -180,251 +512,129 @@ export default function PolarMap({
           resetTrigger={resetTrigger}
           defaultCenter={defaultCenter}
           defaultZoom={defaultZoom}
+          onZoomChange={(z) => setCurrentZoom(z)}
         />
 
-        {/* 1. Station Markers */}
-        {showStations && stations.map((st) => {
-          if (st.latitude == null || st.longitude == null || isNaN(st.latitude) || isNaN(st.longitude)) return null;
-          const isSelected = selectedEntity && selectedEntity.id === st.id && selectedEntity.type === 'station';
+        {/* Render Clusters & Spiderfied Markers */}
+        {clusters.map((cluster) => {
+          // Solo item in cluster: render directly at true coordinate
+          if (cluster.items.length === 1) {
+            return renderItemMarker(cluster.items[0], null, false);
+          }
 
-          return (
-            <Marker
-              key={`st-${st.id}`}
-              position={[st.latitude, st.longitude]}
-              icon={createStationIcon(st.type, isSelected)}
-              eventHandlers={{
-                click: () => onSelectEntity && onSelectEntity({ ...st, type: 'station' })
-              }}
-            >
-              <Popup>
-                <div className="map-popup-card">
-                  <div className="map-popup-header">
-                    <span className="map-popup-badge">STATION</span>
-                    <StatusBadge status={st.status} />
-                  </div>
-                  <div>
-                    <div className="map-popup-name">{st.name}</div>
-                    <div className="map-popup-role">{st.type} • {st.elevation || 'Elevation ASL'}</div>
-                  </div>
-                  <div className="map-popup-coords">
-                    {formatPolarCoords(st.latitude, st.longitude)}
-                  </div>
-                  {st.description && (
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      {st.description}
+          const isExpanded = expandedClusterIds.has(cluster.id);
+          const hasEmergency = cluster.items.some(it => 
+            (it.status || '').toUpperCase() === 'EMERGENCY' || 
+            (it.severity || '').toUpperCase() === 'CRITICAL'
+          );
+
+          if (!isExpanded) {
+            // Render Compact Proximity Cluster Marker
+            return (
+              <Marker
+                key={cluster.id}
+                position={[cluster.latitude, cluster.longitude]}
+                icon={createClusterIcon(cluster.items.length, hasEmergency)}
+                eventHandlers={{
+                  click: () => toggleClusterExpansion(cluster.id)
+                }}
+              >
+                <Popup>
+                  <div className="map-popup-card">
+                    <div className="map-popup-header">
+                      <span className="map-popup-badge" style={{ background: 'rgba(56, 189, 248, 0.2)', color: 'var(--cyan-300)' }}>
+                        ASSET CLUSTER ({cluster.items.length})
+                      </span>
+                      {hasEmergency && <StatusBadge status="EMERGENCY" />}
                     </div>
-                  )}
-                  <div className="map-popup-actions">
-                    <button
-                      className="map-popup-btn"
-                      onClick={() => onSelectEntity && onSelectEntity({ ...st, type: 'station' })}
-                    >
-                      Focus Station Dossier
-                    </button>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      Multiple polar assets logged at {formatPolarCoords(cluster.latitude, cluster.longitude)}:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '140px', overflowY: 'auto' }}>
+                      {cluster.items.map(it => (
+                        <div
+                          key={`c-item-${it.type}-${it.id}`}
+                          onClick={() => {
+                            toggleClusterExpansion(cluster.id);
+                            if (onSelectEntity) onSelectEntity(it);
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            background: 'rgba(8, 13, 26, 0.6)',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-subtle)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <span style={{ fontSize: '11px', fontWeight: '600', color: '#fff' }}>
+                            {it.name || it.unit_name || it.title || it.cargo_code || it.personnel_code}
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--cyan-300)', textTransform: 'uppercase' }}>
+                            {it.type}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="map-popup-actions">
+                      <button
+                        className="map-popup-btn"
+                        onClick={() => toggleClusterExpansion(cluster.id)}
+                      >
+                        Fan-Out / Spiderfy Markers
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
+                </Popup>
+              </Marker>
+            );
+          }
 
-        {/* 2. Incident Markers */}
-        {filteredIncidents.map((inc) => {
-          if (inc.latitude == null || inc.longitude == null || isNaN(inc.latitude) || isNaN(inc.longitude)) return null;
-          const isSelected = selectedEntity && selectedEntity.id === inc.id && selectedEntity.type === 'incident';
-          const severity = (inc.severity || '').toUpperCase();
-          const status = (inc.status || '').toUpperCase();
-          const iconCls = severity === 'CRITICAL' ? 'incident-critical' : 'incident-normal';
-          const iconHtml = `<div class="${iconCls}">${severity}</div>`;
-          const incidentIcon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div class="map-marker-pin map-marker-incident ${isSelected ? 'selected-marker' : ''}">${iconHtml}</div>`,
-            iconSize: [32, 32],
-            iconAnchor: [16, 16],
-            popupAnchor: [0, -18]
-          });
+          // Render Spiderfied / Fanned Out Radial Markers with Connecting Lines
           return (
-            <Marker
-              key={`inc-${inc.id}`}
-              position={[inc.latitude, inc.longitude]}
-              icon={incidentIcon}
-              eventHandlers={{
-                click: () => onSelectEntity && onSelectEntity({ ...inc, type: 'incident' })
-              }}
-            >
-              <Popup>
-                <div className="map-popup-card">
-                  <div className="map-popup-header">
-                    <span className="map-popup-badge">INCIDENT</span>
-                    <StatusBadge status={status} />
-                  </div>
-                  <div className="map-popup-name">{inc.title}</div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Severity:</span>
-                    <span className="map-popup-row-val">{severity}</span>
-                  </div>
-                  <div className="map-popup-coords">
-                    {formatPolarCoords(inc.latitude, inc.longitude)}
-                  </div>
-                  <div className="map-popup-actions">
-                    <button className="map-popup-btn" onClick={() => onSelectEntity && onSelectEntity({ ...inc, type: 'incident' })}>
-                      Focus Incident
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
+            <React.Fragment key={`spider-${cluster.id}`}>
+              {/* Spider Center Collapse Trigger */}
+              <Marker
+                position={[cluster.latitude, cluster.longitude]}
+                icon={createClusterIcon('✕', hasEmergency)}
+                eventHandlers={{
+                  click: () => toggleClusterExpansion(cluster.id)
+                }}
+              />
+
+              {cluster.items.map((item, idx) => {
+                const spiderPos = getSpiderPosition(
+                  cluster.latitude,
+                  cluster.longitude,
+                  idx,
+                  cluster.items.length,
+                  currentZoom
+                );
+
+                return (
+                  <React.Fragment key={`spider-frag-${item.type}-${item.id}`}>
+                    {/* Visual Connector Line from Cluster Origin to Fanned Marker */}
+                    <Polyline
+                      positions={[[cluster.latitude, cluster.longitude], spiderPos]}
+                      pathOptions={{
+                        color: hasEmergency ? '#ef4444' : '#00d3f3',
+                        weight: 1.8,
+                        opacity: 0.7,
+                        dashArray: '3, 4'
+                      }}
+                    />
+                    {/* Individual Spiderfied Marker */}
+                    {renderItemMarker(item, spiderPos, true)}
+                  </React.Fragment>
+                );
+              })}
+            </React.Fragment>
           );
         })}
 
-        {/* 3. Response Unit Markers */}
-        {filteredResponseUnits.map((unit) => {
-          if (unit.latitude == null || unit.longitude == null || isNaN(unit.latitude) || isNaN(unit.longitude)) return null;
-          const isSelected = selectedEntity && selectedEntity.id === unit.id && selectedEntity.type === 'response_unit';
-          const status = (unit.status || '').toUpperCase();
-          const unitIcon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div class="map-marker-pin map-marker-unit ${isSelected ? 'selected-marker' : ''}">${unit.unit_code}</div>`,
-            iconSize: [28, 28],
-            iconAnchor: [14, 14],
-            popupAnchor: [0, -16]
-          });
-          return (
-            <Marker
-              key={`unit-${unit.id}`}
-              position={[unit.latitude, unit.longitude]}
-              icon={unitIcon}
-              eventHandlers={{
-                click: () => onSelectEntity && onSelectEntity({ ...unit, type: 'response_unit' })
-              }}
-            >
-              <Popup>
-                <div className="map-popup-card">
-                  <div className="map-popup-header">
-                    <span className="map-popup-badge">UNIT</span>
-                    <StatusBadge status={status} />
-                  </div>
-                  <div className="map-popup-name">{unit.unit_name || unit.unit_code}</div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Type:</span>
-                    <span className="map-popup-row-val">{unit.unit_type}</span>
-                  </div>
-                  <div className="map-popup-coords">
-                    {formatPolarCoords(unit.latitude, unit.longitude)}
-                  </div>
-                  <div className="map-popup-actions">
-                    <button className="map-popup-btn" onClick={() => onSelectEntity && onSelectEntity({ ...unit, type: 'response_unit' })}>
-                      Focus Unit
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-
-        {/* 2. Cargo Markers */}
-        {showCargo && !emergencyOnly && cargo.map((c) => {
-          if (c.latitude == null || c.longitude == null || isNaN(c.latitude) || isNaN(c.longitude)) return null;
-          const isSelected = selectedEntity && selectedEntity.id === c.id && selectedEntity.type === 'cargo';
-
-          return (
-            <Marker
-              key={`cg-${c.id}`}
-              position={[c.latitude, c.longitude]}
-              icon={createCargoIcon(c.priority, isSelected)}
-              eventHandlers={{
-                click: () => onSelectEntity && onSelectEntity({ ...c, type: 'cargo' })
-              }}
-            >
-              <Popup>
-                <div className="map-popup-card">
-                  <div className="map-popup-header">
-                    <span className="map-popup-badge">{c.cargo_code}</span>
-                    <StatusBadge status={c.status} />
-                  </div>
-                  <div>
-                    <div className="map-popup-name">{c.name}</div>
-                    <div className="map-popup-role">{c.category} • {c.weight}</div>
-                  </div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Location:</span>
-                    <span className="map-popup-row-val">{c.current_location}</span>
-                  </div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Route:</span>
-                    <span className="map-popup-row-val" style={{ fontSize: '10.5px' }}>{c.origin} → {c.destination}</span>
-                  </div>
-                  <div className="map-popup-coords">
-                    {formatPolarCoords(c.latitude, c.longitude)}
-                  </div>
-                  <div className="map-popup-actions">
-                    <button
-                      className="map-popup-btn"
-                      onClick={() => onSelectEntity && onSelectEntity({ ...c, type: 'cargo' })}
-                    >
-                      Inspect Cargo Telemetry
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-
-        {/* 3. Personnel Markers */}
-        {showPersonnel && filteredPersonnel.map((p) => {
-          if (p.latitude == null || p.longitude == null || isNaN(p.latitude) || isNaN(p.longitude)) return null;
-          const isSelected = selectedEntity && selectedEntity.id === p.id && selectedEntity.type === 'personnel';
-          const isEmerg = (p.status || '').toUpperCase() === 'EMERGENCY';
-
-          return (
-            <Marker
-              key={`ps-${p.id}`}
-              position={[p.latitude, p.longitude]}
-              icon={createPersonIcon(p.status, isSelected)}
-              eventHandlers={{
-                click: () => onSelectEntity && onSelectEntity({ ...p, type: 'personnel' })
-              }}
-            >
-              <Popup>
-                <div className="map-popup-card">
-                  <div className="map-popup-header">
-                    <span className={`map-popup-badge ${isEmerg ? 'emergency' : ''}`}>
-                      {p.personnel_code}
-                    </span>
-                    <StatusBadge status={p.status} />
-                  </div>
-                  <div>
-                    <div className="map-popup-name">{p.name}</div>
-                    <div className="map-popup-role">{p.role} • {p.department}</div>
-                  </div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Reported Location:</span>
-                    <span className="map-popup-row-val">{p.current_location}</span>
-                  </div>
-                  <div className="map-popup-row">
-                    <span className="map-popup-row-label">Last Updated:</span>
-                    <span className="map-popup-row-val" style={{ fontSize: '10.5px' }}>{p.last_updated || 'Recent'}</span>
-                  </div>
-                  <div className="map-popup-coords">
-                    {formatPolarCoords(p.latitude, p.longitude)}
-                  </div>
-                  <div className="map-popup-actions">
-                    <button
-                      className="map-popup-btn"
-                      onClick={() => onSelectEntity && onSelectEntity({ ...p, type: 'personnel' })}
-                    >
-                      View Personnel Dossier
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
-        })}
-
-        {/* 4. Personnel Movement Path (Historical Polyline) */}
+        {/* Historical Polyline Trail for Selected Entity */}
         {polylineCoords.length > 1 && (
           <Polyline
             positions={polylineCoords}

@@ -242,9 +242,10 @@ export default function App() {
       case 'cargo':
         return (
           <CargoAssetsPage
-            key={expeditionNavFilter?.expeditionId ?? 'cargo'}
+            key={(expeditionNavFilter?.expeditionId ?? 'cargo') + (selectedCargo?.id ? `-${selectedCargo.id}` : '')}
             onSelectCargo={(cargo) => setSelectedCargo(cargo)}
             initialExpeditionId={expeditionNavFilter?.expeditionId || null}
+            initialCargoId={selectedCargo?.id || null}
           />
         );
       case 'inventory':
@@ -252,16 +253,23 @@ export default function App() {
       case 'personnel':
         return (
           <PersonnelPage
-            key={expeditionNavFilter?.expeditionId ?? 'personnel'}
+            key={(expeditionNavFilter?.expeditionId ?? 'personnel') + (selectedPerson?.id ? `-${selectedPerson.id}` : '')}
             onSelectPersonnel={(person) => setSelectedPerson(person)}
             initialExpeditionId={expeditionNavFilter?.expeditionId || null}
+            initialPersonId={selectedPerson?.id || null}
           />
         );
       case 'map':
         return (
           <MapTrackingPage 
-            onSelectPersonnel={(person) => setSelectedPerson(person)}
-            onSelectCargo={(cargo) => setSelectedCargo(cargo)}
+            onSelectPersonnel={(person) => {
+              setSelectedPerson(person);
+              setActiveTab('personnel');
+            }}
+            onSelectCargo={(cargo) => {
+              setSelectedCargo(cargo);
+              setActiveTab('cargo');
+            }}
             initialSelectedEntity={mapInitialEntity}
           />
         );

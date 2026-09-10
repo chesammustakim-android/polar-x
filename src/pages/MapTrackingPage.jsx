@@ -48,6 +48,7 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
 
   // Selected Entity & Movement Trail
   const [selectedEntity, setSelectedEntity] = useState(null);
+  const [selectedPersonnelDetail, setSelectedPersonnelDetail] = useState(null);
   const [movementHistory, setMovementHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
@@ -104,9 +105,9 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
         );
 
         if (matchingStation) {
-          setSelectedEntity({ ...matchingStation, type: 'station' });
+          handleSelectEntity({ ...matchingStation, type: 'station' });
         } else {
-          setSelectedEntity({
+          handleSelectEntity({
             id: initialSelectedEntity.id || 'radar-pin',
             name: name || 'Polar Radar Track',
             latitude: lat,
@@ -123,13 +124,18 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
   // Handle entity selection and load historical movement trail
   const handleSelectEntity = async (entity) => {
     setSelectedEntity(entity);
+    setSelectedPersonnelDetail(null);
     setMovementHistory([]);
 
     if (entity && entity.type === 'personnel') {
       setIsLoadingHistory(true);
       try {
-        const hist = await api.getPersonnelHistory(entity.id);
+        const [hist, detail] = await Promise.all([
+          api.getPersonnelHistory(entity.id),
+          api.getPersonnelById(entity.id)
+        ]);
         setMovementHistory(Array.isArray(hist) ? hist : []);
+        if (detail) setSelectedPersonnelDetail(detail);
       } catch (err) {
         console.warn(`[POLAR-X Map] Failed to load history for personnel #${entity.id}:`, err);
       } finally {
@@ -606,11 +612,26 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
 
               <div className="map-dossier-body">
                 <div>
-                  <h4 style={{ color: '#fff', fontSize: '16px', fontWeight: '700', marginBottom: '2px' }}>
-                    {selectedEntity.name}
-                  </h4>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-                    {selectedEntity.role ? `${selectedEntity.role} • ${selectedEntity.department || 'Operations'}` : (selectedEntity.type || selectedEntity.category)}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                    {(selectedPersonnelDetail?.personnel_code || selectedEntity.personnel_code || selectedEntity.unit_code || selectedEntity.cargo_code) && (
+                      <span className="prs-code-badge" style={{ fontSize: '11px' }}>
+                        {selectedPersonnelDetail?.personnel_code || selectedEntity.personnel_code || selectedEntity.unit_code || selectedEntity.cargo_code}
+                      </span>
+                    )}
+                    <h4 style={{ color: '#fff', fontSize: '15px', fontWeight: '700', margin: 0 }}>
+                      {selectedPersonnelDetail?.name || selectedEntity.name || selectedEntity.title || selectedEntity.unit_name}
+                    </h4>
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11.5px' }}>
+                    {selectedEntity.type === 'personnel'
+                      ? `${selectedPersonnelDetail?.role || selectedEntity.role} • ${selectedPersonnelDetail?.department || selectedEntity.department || 'Science & Research'}`
+                      : selectedEntity.type === 'station'
+                      ? `${selectedEntity.station_type || selectedEntity.type} • ${selectedEntity.region || 'Antarctica'}`
+                      : selectedEntity.type === 'cargo'
+                      ? `${selectedEntity.category} • ${selectedEntity.weight || 'Standard Freight'}`
+                      : selectedEntity.type === 'incident'
+                      ? `${selectedEntity.incident_type || 'Emergency'} • ${selectedEntity.severity}`
+                      : `${selectedEntity.unit_type || 'SAR Unit'}`}
                   </div>
                 </div>
 
@@ -618,38 +639,95 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                 <div className="map-coords-card">
                   <div>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      Last Reported Coordinates
+                      Reported Coordinates
                     </div>
                     <div className="map-coords-val">
                       {formatPolarCoords(selectedEntity.latitude, selectedEntity.longitude)}
                     </div>
                   </div>
-                  {selectedEntity.last_updated && (
-                    <span className={`map-freshness-badge ${getLocationFreshness(selectedEntity.last_updated).cls}`}>
+                  {(selectedPersonnelDetail?.last_updated || selectedEntity.last_updated) && (
+                    <span className={`map-freshness-badge ${getLocationFreshness(selectedPersonnelDetail?.last_updated || selectedEntity.last_updated).cls}`}>
                       <Clock size={10} />
-                      {getLocationFreshness(selectedEntity.last_updated).label}
+                      {getLocationFreshness(selectedPersonnelDetail?.last_updated || selectedEntity.last_updated).label}
                     </span>
                   )}
                 </div>
 
-                {/* Location Description */}
-                <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Location: </span>
-                  <strong style={{ color: 'var(--cyan-300)' }}>{selectedEntity.current_location || selectedEntity.region}</strong>
-                </div>
+                {/* Specific Personnel Fields */}
+                {selectedEntity.type === 'personnel' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Location:</span>
+                      <strong style={{ color: 'var(--cyan-300)' }}>{selectedPersonnelDetail?.current_location || selectedEntity.current_location || 'At Base'}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Expedition:</span>
+                      <span style={{ color: '#fff' }}>{selectedPersonnelDetail?.expedition_name || selectedEntity.expedition_name || 'Assigned Expedition'}</span>
+                    </div>
+                    {selectedPersonnelDetail?.specialization && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Specialization:</span>
+                        <span style={{ color: 'var(--text-secondary)', textAlign: 'right', maxWidth: '60%' }}>{selectedPersonnelDetail.specialization}</span>
+                      </div>
+                    )}
+                    {(selectedPersonnelDetail?.contact || selectedPersonnelDetail?.emergency_contact) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Comms / Emergency:</span>
+                        <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                          {selectedPersonnelDetail.contact || selectedPersonnelDetail.emergency_contact}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Specific Station Fields */}
+                {selectedEntity.type === 'station' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Region:</span>
+                      <strong style={{ color: 'var(--cyan-300)' }}>{selectedEntity.region || 'Polar Sector'}</strong>
+                    </div>
+                    {selectedEntity.elevation && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Elevation:</span>
+                        <span style={{ color: '#fff' }}>{selectedEntity.elevation}</span>
+                      </div>
+                    )}
+                    {selectedEntity.description && (
+                      <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
+                        {selectedEntity.description}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Specific Cargo Fields */}
+                {selectedEntity.type === 'cargo' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Route:</span>
+                      <strong style={{ color: 'var(--cyan-300)', fontSize: '11px' }}>{selectedEntity.origin} → {selectedEntity.destination}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Current Location:</span>
+                      <span style={{ color: '#fff' }}>{selectedEntity.current_location}</span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Movement Trail Summary if Available */}
                 {selectedEntity.type === 'personnel' && (
                   <div>
                     <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>
-                      Recent Geospatial Movement Path
+                      Recent Geospatial Movement Trail
                     </div>
                     {isLoadingHistory ? (
                       <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Loading movement trail...</div>
                     ) : movementHistory.length === 0 ? (
                       <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>No historical waypoints recorded.</div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '100px', overflowY: 'auto' }}>
                         {movementHistory.slice(0, 4).map((m) => (
                           <div key={m.id} style={{ fontSize: '11px', background: 'rgba(8,13,26,0.5)', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
@@ -667,24 +745,24 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                 )}
 
                 {/* Action Buttons */}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                   {selectedEntity.type === 'personnel' && onSelectPersonnel && (
                     <button
                       className="btn-primary"
-                      style={{ flex: 1, padding: '7px', fontSize: '12px' }}
+                      style={{ flex: 1, padding: '8px', fontSize: '12px', justifyContent: 'center' }}
                       onClick={() => onSelectPersonnel(selectedEntity)}
                     >
-                      <Eye size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                      <Eye size={13} style={{ display: 'inline', marginRight: '4px' }} />
                       Open Full Dossier
                     </button>
                   )}
                   {selectedEntity.type === 'cargo' && onSelectCargo && (
                     <button
                       className="btn-primary"
-                      style={{ flex: 1, padding: '7px', fontSize: '12px' }}
+                      style={{ flex: 1, padding: '8px', fontSize: '12px', justifyContent: 'center' }}
                       onClick={() => onSelectCargo(selectedEntity)}
                     >
-                      <Box size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                      <Box size={13} style={{ display: 'inline', marginRight: '4px' }} />
                       View Cargo Manifest
                     </button>
                   )}

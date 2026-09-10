@@ -637,7 +637,7 @@ function AddPersonnelModal({ expeditions, onClose, onSuccess }) {
 // ============================================================
 // MAIN PAGE COMPONENT
 // ============================================================
-export default function PersonnelPage({ initialExpeditionId }) {
+export default function PersonnelPage({ initialExpeditionId, initialPersonId }) {
   const [personnel, setPersonnel]     = useState([]);
   const [summary, setSummary]         = useState(null);
   const [expeditions, setExpeditions] = useState([]);
@@ -655,7 +655,7 @@ export default function PersonnelPage({ initialExpeditionId }) {
   const [activeCard, setActiveCard] = useState(null);
 
   // Modals / drawers
-  const [viewPersonId, setViewPersonId]     = useState(null);
+  const [viewPersonId, setViewPersonId]     = useState(initialPersonId || null);
   const [locUpdatePerson, setLocUpdatePerson] = useState(null);
   const [histPerson, setHistPerson]         = useState(null);
   const [showAddModal, setShowAddModal]     = useState(false);
