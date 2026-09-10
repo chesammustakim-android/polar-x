@@ -102,11 +102,12 @@ function createUnitIcon(unitCode, isSelected) {
   });
 }
 
-function createClusterIcon(count, hasEmergency) {
+function createClusterIcon(count, hasEmergency, titleText = '') {
   const emergCls = hasEmergency ? ' has-emergency' : '';
+  const tooltip = titleText || `Cluster: ${count} assets. Click to spiderfy/expand.`;
   return L.divIcon({
     className: 'custom-div-icon',
-    html: `<div class="map-marker-cluster${emergCls}" title="Cluster: ${count} assets. Click to spiderfy/expand."><span class="cluster-count">${count}</span></div>`,
+    html: `<div class="map-marker-cluster${emergCls}" title="${tooltip.replace(/"/g, '&quot;')}"><span class="cluster-count">${count}</span></div>`,
     iconSize: [36, 36],
     iconAnchor: [18, 18],
     popupAnchor: [0, -20]
@@ -125,12 +126,13 @@ function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoo
 
   useEffect(() => {
     if (selectedEntity && selectedEntity.latitude != null && selectedEntity.longitude != null) {
-      map.flyTo([selectedEntity.latitude, selectedEntity.longitude], Math.max(map.getZoom(), 7), {
+      const targetZoom = selectedEntity._focus ? Math.max(map.getZoom(), 8) : Math.max(map.getZoom(), 7);
+      map.flyTo([selectedEntity.latitude, selectedEntity.longitude], targetZoom, {
         duration: 1.2,
         easeLinearity: 0.25
       });
     }
-  }, [selectedEntity, map]);
+  }, [selectedEntity, selectedEntity?._focusKey, map]);
 
   useEffect(() => {
     if (resetTrigger > 0) {
@@ -141,6 +143,90 @@ function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoo
   }, [resetTrigger, defaultCenter, defaultZoom, map]);
 
   return null;
+}
+
+// Contextual cluster labeling using real Polar-X stations & asset data
+function getClusterContext(cluster, stations = []) {
+  let personnelCount = 0;
+  let cargoCount = 0;
+  let unitCount = 0;
+  let stationCount = 0;
+  let incidentCount = 0;
+  let stationItem = null;
+  const locationNames = new Set();
+
+  cluster.items.forEach(it => {
+    if (it.type === 'personnel') personnelCount++;
+    else if (it.type === 'cargo') cargoCount++;
+    else if (it.type === 'response_unit') unitCount++;
+    else if (it.type === 'station') {
+      stationCount++;
+      stationItem = it;
+    } else if (it.type === 'incident') incidentCount++;
+
+    if (it.current_location) locationNames.add(it.current_location);
+    if (it.location_name) locationNames.add(it.location_name);
+    if (it.region) locationNames.add(it.region);
+    if (it.station) locationNames.add(it.station);
+  });
+
+  // Determine best real location name from existing stations
+  let bestLocationName = '';
+  if (stationItem && stationItem.name) {
+    bestLocationName = stationItem.name;
+  } else if (stations && stations.length > 0) {
+    let minDist = Infinity;
+    let closestStation = null;
+    stations.forEach(st => {
+      if (st.latitude != null && st.longitude != null) {
+        const dLat = st.latitude - cluster.latitude;
+        const dLon = st.longitude - cluster.longitude;
+        const dist = Math.hypot(dLat, dLon);
+        if (dist < minDist) {
+          minDist = dist;
+          closestStation = st;
+        }
+      }
+    });
+    // Proximity threshold ~0.65 degrees (~70 km in polar regions)
+    if (closestStation && minDist <= 0.65) {
+      bestLocationName = closestStation.name;
+    }
+  }
+
+  if (!bestLocationName) {
+    const locArr = Array.from(locationNames).filter(Boolean);
+    if (locArr.length > 0) {
+      bestLocationName = locArr[0];
+    } else {
+      bestLocationName = 'Polar Operational Sector';
+    }
+  }
+
+  // Construct readable entity counts breakdown
+  const parts = [];
+  if (personnelCount > 0) parts.push(`${personnelCount} crew`);
+  if (cargoCount > 0) parts.push(`${cargoCount} cargo`);
+  if (unitCount > 0) parts.push(`${unitCount} SAR unit${unitCount !== 1 ? 's' : ''}`);
+  if (stationCount > 0) parts.push(`${stationCount} station`);
+  if (incidentCount > 0) parts.push(`${incidentCount} incident${incidentCount !== 1 ? 's' : ''}`);
+
+  const breakdownStr = parts.join(' · ') || `${cluster.items.length} assets`;
+  const fullLabel = `${bestLocationName} — ${breakdownStr}`;
+
+  return {
+    locationName: bestLocationName,
+    breakdownStr,
+    fullLabel,
+    counts: {
+      personnel: personnelCount,
+      cargo: cargoCount,
+      units: unitCount,
+      stations: stationCount,
+      incidents: incidentCount,
+      total: cluster.items.length
+    }
+  };
 }
 
 // Cluster grouping helper by geographic proximity
@@ -191,9 +277,13 @@ export default function PolarMap({
   selectedEntity = null,
   movementHistory = [],
   onSelectEntity,
+  onOpenFullDossier,
+  onOpenCargoManifest,
+  onFocusEntity,
   showPersonnel = true,
   showStations = true,
   showCargo = true,
+  showUnits = true,
   emergencyOnly = false,
   resetTrigger = 0
 }) {
@@ -227,8 +317,11 @@ export default function PolarMap({
   }, [incidents, emergencyOnly]);
 
   const filteredResponseUnits = useMemo(() => {
-    return responseUnits;
-  }, [responseUnits]);
+    if (!showUnits) return [];
+    return emergencyOnly
+      ? responseUnits.filter(u => (u.status || '').toUpperCase() === 'ON_MISSION' || (u.status || '').toUpperCase() === 'DISPATCHED')
+      : responseUnits;
+  }, [responseUnits, showUnits, emergencyOnly]);
 
   // Aggregate all visible entity items with normalized type tags
   const allVisibleEntities = useMemo(() => {
@@ -365,9 +458,16 @@ export default function PolarMap({
                 <div className="map-popup-actions">
                   <button
                     className="map-popup-btn"
-                    onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'personnel' })}
+                    onClick={() => {
+                      if (onOpenFullDossier) {
+                        onOpenFullDossier(item.id);
+                      }
+                      if (onSelectEntity) {
+                        onSelectEntity({ ...item, type: 'personnel' });
+                      }
+                    }}
                   >
-                    View Personnel Dossier
+                    Open Full Dossier
                   </button>
                 </div>
               </div>
@@ -405,9 +505,16 @@ export default function PolarMap({
                 <div className="map-popup-actions">
                   <button
                     className="map-popup-btn"
-                    onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'cargo' })}
+                    onClick={() => {
+                      if (onOpenCargoManifest) {
+                        onOpenCargoManifest(item.id);
+                      }
+                      if (onSelectEntity) {
+                        onSelectEntity({ ...item, type: 'cargo' });
+                      }
+                    }}
                   >
-                    Inspect Cargo Telemetry
+                    View Cargo Manifest
                   </button>
                 </div>
               </div>
@@ -474,7 +581,16 @@ export default function PolarMap({
                   {formatPolarCoords(item.latitude, item.longitude)}
                 </div>
                 <div className="map-popup-actions">
-                  <button className="map-popup-btn" onClick={() => onSelectEntity && onSelectEntity({ ...item, type: 'response_unit' })}>
+                  <button
+                    className="map-popup-btn"
+                    onClick={() => {
+                      if (onFocusEntity) {
+                        onFocusEntity({ ...item, type: 'response_unit', _focus: true, _focusKey: Date.now() });
+                      } else if (onSelectEntity) {
+                        onSelectEntity({ ...item, type: 'response_unit', _focus: true, _focusKey: Date.now() });
+                      }
+                    }}
+                  >
                     Focus Unit
                   </button>
                 </div>
@@ -515,6 +631,27 @@ export default function PolarMap({
           onZoomChange={(z) => setCurrentZoom(z)}
         />
 
+        {/* Subtle Command-Center Station Location Labels */}
+        {showStations && currentZoom >= 3 && filteredStations.map((st) => {
+          if (st.latitude == null || st.longitude == null || isNaN(st.latitude) || isNaN(st.longitude)) return null;
+          return (
+            <Marker
+              key={`st-lbl-${st.id}`}
+              position={[st.latitude, st.longitude]}
+              icon={L.divIcon({
+                className: 'station-label-div-icon',
+                html: `<div class="station-map-label ${currentZoom >= 5 ? 'visible' : 'compact'}">
+                  <span class="station-label-name">${st.name}</span>
+                  ${currentZoom >= 6 && st.region ? `<span class="station-label-region">${st.region}</span>` : ''}
+                </div>`,
+                iconSize: [140, 24],
+                iconAnchor: [70, -14]
+              })}
+              interactive={false}
+            />
+          );
+        })}
+
         {/* Render Clusters & Spiderfied Markers */}
         {clusters.map((cluster) => {
           // Solo item in cluster: render directly at true coordinate
@@ -527,14 +664,15 @@ export default function PolarMap({
             (it.status || '').toUpperCase() === 'EMERGENCY' || 
             (it.severity || '').toUpperCase() === 'CRITICAL'
           );
+          const ctx = getClusterContext(cluster, stations);
 
           if (!isExpanded) {
-            // Render Compact Proximity Cluster Marker
+            // Render Compact Proximity Cluster Marker with Contextual Breakdown
             return (
               <Marker
                 key={cluster.id}
                 position={[cluster.latitude, cluster.longitude]}
-                icon={createClusterIcon(cluster.items.length, hasEmergency)}
+                icon={createClusterIcon(cluster.items.length, hasEmergency, `${ctx.fullLabel}. Click to spiderfy/expand.`)}
                 eventHandlers={{
                   click: () => toggleClusterExpansion(cluster.id)
                 }}
@@ -543,12 +681,15 @@ export default function PolarMap({
                   <div className="map-popup-card">
                     <div className="map-popup-header">
                       <span className="map-popup-badge" style={{ background: 'rgba(56, 189, 248, 0.2)', color: 'var(--cyan-300)' }}>
-                        ASSET CLUSTER ({cluster.items.length})
+                        {ctx.locationName.toUpperCase()} ({cluster.items.length})
                       </span>
                       {hasEmergency && <StatusBadge status="EMERGENCY" />}
                     </div>
-                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                      Multiple polar assets logged at {formatPolarCoords(cluster.latitude, cluster.longitude)}:
+                    <div style={{ fontSize: '11.5px', color: 'var(--cyan-300)', fontWeight: '600', marginBottom: '2px' }}>
+                      {ctx.breakdownStr}
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                      Position: {formatPolarCoords(cluster.latitude, cluster.longitude)}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '140px', overflowY: 'auto' }}>
                       {cluster.items.map(it => (
@@ -556,7 +697,7 @@ export default function PolarMap({
                           key={`c-item-${it.type}-${it.id}`}
                           onClick={() => {
                             toggleClusterExpansion(cluster.id);
-                            if (onSelectEntity) onSelectEntity(it);
+                            if (onSelectEntity) onSelectEntity({ ...it, _focus: true, _focusKey: Date.now() });
                           }}
                           style={{
                             padding: '4px 8px',

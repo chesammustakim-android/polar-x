@@ -95,7 +95,7 @@ function MovementTimeline({ movements, isLoading }) {
 }
 
 // ---- DETAIL DRAWER ----
-function PersonnelDetailDrawer({ personId, onClose }) {
+export function PersonnelDetailDrawer({ personId, onClose }) {
   const [detail, setDetail] = useState(null);
   const [movements, setMovements] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');

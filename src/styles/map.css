@@ -531,6 +531,107 @@
   color: #f87171;
 }
 
+/* Response Unit Marker Styles */
+.map-marker-unit {
+  background: #0369a1;
+  border-color: #38bdf8;
+  color: #fff;
+  border-radius: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.map-marker-unit.on-mission {
+  background: #0284c7;
+  border-color: #38bdf8;
+}
+.map-marker-unit.dispatched {
+  background: #c2410c;
+  border-color: #f97316;
+}
+.map-marker-unit.unavailable {
+  background: #374151;
+  border-color: #6b7280;
+  color: #9ca3af;
+}
+
+/* Selected Marker Highlight */
+.selected-marker {
+  transform: scale(1.3) !important;
+  z-index: 1000 !important;
+  outline: 3px solid #00d3f3 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 4px rgba(0, 211, 243, 0.45), 0 0 20px rgba(0, 211, 243, 0.8), 0 8px 24px rgba(0, 0, 0, 0.8) !important;
+  animation: selected-marker-pulse 1.8s ease-in-out infinite !important;
+}
+
+@keyframes selected-marker-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 4px rgba(0, 211, 243, 0.45), 0 0 16px rgba(0, 211, 243, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(0, 211, 243, 0.15), 0 0 28px rgba(0, 211, 243, 0.95);
+  }
+}
+
+/* Station Location Labels */
+.station-label-div-icon {
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none !important;
+}
+
+.station-map-label {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  background: rgba(6, 11, 24, 0.88);
+  border: 1px solid rgba(0, 211, 243, 0.35);
+  border-radius: 4px;
+  padding: 2px 7px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.7), 0 0 8px rgba(0, 211, 243, 0.15);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  white-space: nowrap;
+}
+.station-map-label.hidden {
+  display: none !important;
+}
+.station-map-label.compact {
+  font-size: 10px;
+  opacity: 0.9;
+}
+.station-map-label.visible {
+  font-size: 11px;
+  opacity: 1;
+}
+.station-label-name {
+  font-weight: 700;
+  color: #f1f5f9;
+  letter-spacing: 0.03em;
+}
+.station-label-region {
+  font-size: 9px;
+  color: var(--cyan-400);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.unit-code-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.3);
+}
+.map-stat-icon.unit { background: rgba(14, 165, 233, 0.12); color: #38bdf8; }
+
 /* Cluster Marker Styles */
 .map-marker-cluster {
   background: #0d1b2a;
@@ -570,7 +671,7 @@
   border: 1px solid rgba(0, 211, 243, 0.35);
   border-radius: 12px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.7), 0 0 20px rgba(0, 211, 243, 0.15);
-  z-index: 800;
+  z-index: 1000;
   overflow: hidden;
   animation: map-slide-up 0.25s ease;
 }

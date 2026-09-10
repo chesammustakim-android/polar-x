@@ -7,6 +7,8 @@ import {
 import PolarMap, { formatPolarCoords } from '../components/map/PolarMap';
 import StatusBadge from '../components/common/StatusBadge';
 import { api } from '../services/api';
+import { PersonnelDetailDrawer } from './PersonnelPage';
+import CargoDetailModal from '../components/dashboard/CargoDetailModal';
 
 // Helper for location freshness
 function getLocationFreshness(lastUpdatedStr) {
@@ -37,13 +39,15 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
   const [showPersonnel, setShowPersonnel] = useState(true);
   const [showStations, setShowStations] = useState(true);
   const [showCargo, setShowCargo] = useState(true);
+  const [showUnits, setShowUnits] = useState(true);
   const [emergencyOnly, setEmergencyOnly] = useState(false);
 
   // Filters
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('personnel'); // 'personnel' | 'cargo' | 'stations'
+  const [activeTab, setActiveTab] = useState('personnel'); // 'personnel' | 'cargo' | 'stations' | 'units'
   const [personnelStatusFilter, setPersonnelStatusFilter] = useState('ALL');
   const [cargoStatusFilter, setCargoStatusFilter] = useState('ALL');
+  const [unitStatusFilter, setUnitStatusFilter] = useState('ALL');
   const [expeditionFilter, setExpeditionFilter] = useState('ALL');
 
   // Selected Entity & Movement Trail
@@ -51,6 +55,10 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
   const [selectedPersonnelDetail, setSelectedPersonnelDetail] = useState(null);
   const [movementHistory, setMovementHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // Full Dossier / Modal Overlays (preserves map context when closed)
+  const [fullDossierPersonId, setFullDossierPersonId] = useState(null);
+  const [fullCargoModalId, setFullCargoModalId] = useState(null);
 
   // Map view reset trigger
   const [resetTrigger, setResetTrigger] = useState(0);
@@ -123,11 +131,33 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
 
   // Handle entity selection and load historical movement trail
   const handleSelectEntity = async (entity) => {
-    setSelectedEntity(entity);
+    if (!entity) {
+      setSelectedEntity(null);
+      setSelectedPersonnelDetail(null);
+      setMovementHistory([]);
+      return;
+    }
+
+    const normalized = {
+      ...entity,
+      _focusKey: entity._focusKey || Date.now()
+    };
+    setSelectedEntity(normalized);
     setSelectedPersonnelDetail(null);
     setMovementHistory([]);
 
-    if (entity && entity.type === 'personnel') {
+    // Automatically align explorer tab with selected entity type
+    if (entity.type === 'personnel' && activeTab !== 'personnel') {
+      setActiveTab('personnel');
+    } else if (entity.type === 'cargo' && activeTab !== 'cargo') {
+      setActiveTab('cargo');
+    } else if (entity.type === 'station' && activeTab !== 'stations') {
+      setActiveTab('stations');
+    } else if (entity.type === 'response_unit' && activeTab !== 'units') {
+      setActiveTab('units');
+    }
+
+    if (entity.type === 'personnel') {
       setIsLoadingHistory(true);
       try {
         const [hist, detail] = await Promise.all([
@@ -141,7 +171,7 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
       } finally {
         setIsLoadingHistory(false);
       }
-    } else if (entity && entity.type === 'cargo') {
+    } else if (entity.type === 'cargo') {
       setIsLoadingHistory(true);
       try {
         const hist = await api.getCargoHistory(entity.id);
@@ -194,6 +224,20 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
     return true;
   });
 
+  const filteredUnits = responseUnits.filter(u => {
+    if (emergencyOnly && (u.status || '').toUpperCase() !== 'ON_MISSION' && (u.status || '').toUpperCase() !== 'DISPATCHED') return false;
+    if (unitStatusFilter !== 'ALL' && (u.status || '').toUpperCase() !== unitStatusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const matchCode = (u.unit_code || '').toLowerCase().includes(q);
+      const matchName = (u.name || u.unit_name || '').toLowerCase().includes(q);
+      const matchType = (u.unit_type || '').toLowerCase().includes(q);
+      const matchLoc = (u.station_name || '').toLowerCase().includes(q);
+      if (!matchCode && !matchName && !matchType && !matchLoc) return false;
+    }
+    return true;
+  });
+
   // Calculate live stats
   const totalPersonnelCount = personnelSummary?.total_personnel ?? personnel.length;
   const fieldPersonnelCount = personnelSummary?.field ?? personnel.filter(p => (p.status || '').toUpperCase() === 'FIELD').length;
@@ -202,6 +246,7 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
   const totalCargoCount = cargoSummary?.total_cargo ?? cargo.length;
   const activeCargoCount = (cargoSummary?.in_transit ?? 0) + (cargoSummary?.loaded ?? 0) + (cargoSummary?.at_port ?? 0);
   const stationsCount = stations.length;
+  const unitsCount = responseUnits.length;
 
   return (
     <div className="placeholder-page" style={{ paddingBottom: '32px' }}>
@@ -329,6 +374,13 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
               <Building2 size={14} />
               <span>Stations ({filteredStations.length})</span>
             </div>
+            <div
+              className={`map-explorer-tab ${activeTab === 'units' ? 'active' : ''}`}
+              onClick={() => setActiveTab('units')}
+            >
+              <ShieldAlert size={14} />
+              <span>SAR Units ({filteredUnits.length})</span>
+            </div>
           </div>
 
           {/* Search & Filter Controls */}
@@ -397,6 +449,24 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                   {expeditions.map(exp => (
                     <option key={exp.id} value={exp.id}>{exp.name}</option>
                   ))}
+                </select>
+              </div>
+            )}
+
+            {activeTab === 'units' && (
+              <div className="map-explorer-select-row">
+                <select
+                  className="map-explorer-select"
+                  value={unitStatusFilter}
+                  onChange={(e) => setUnitStatusFilter(e.target.value)}
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="AVAILABLE">Available</option>
+                  <option value="DISPATCHED">Dispatched</option>
+                  <option value="ON_MISSION">On Mission</option>
+                  <option value="RETURNING">Returning</option>
+                  <option value="UNAVAILABLE">Unavailable</option>
+                  <option value="OFF_DUTY">Off Duty</option>
                 </select>
               </div>
             )}
@@ -498,7 +568,7 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                     <div
                       key={st.id}
                       className={`map-explorer-item ${isSelected ? 'selected' : ''}`}
-                      onClick={() => handleSelectEntity({ ...st, type: 'station' })}
+                      onClick={() => handleSelectEntity({ ...st, type: 'station', _focus: true, _focusKey: Date.now() })}
                     >
                       <div className="map-explorer-item-header">
                         <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--cyan-300)', fontFamily: 'var(--font-mono)' }}>
@@ -514,6 +584,42 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                       </div>
                       <div className="map-explorer-item-coords">
                         {formatPolarCoords(st.latitude, st.longitude)}
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            )}
+
+            {/* SAR Response Unit List Items */}
+            {!isLoading && activeTab === 'units' && (
+              filteredUnits.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                  No SAR response units match the selected filters.
+                </div>
+              ) : (
+                filteredUnits.map((u) => {
+                  const isSelected = selectedEntity && selectedEntity.id === u.id && selectedEntity.type === 'response_unit';
+                  const isMission = (u.status || '').toUpperCase() === 'ON_MISSION' || (u.status || '').toUpperCase() === 'DISPATCHED';
+
+                  return (
+                    <div
+                      key={u.id}
+                      className={`map-explorer-item ${isMission ? 'emergency' : ''} ${isSelected ? 'selected' : ''}`}
+                      onClick={() => handleSelectEntity({ ...u, type: 'response_unit', _focus: true, _focusKey: Date.now() })}
+                    >
+                      <div className="map-explorer-item-header">
+                        <span className="unit-code-badge">{u.unit_code}</span>
+                        <StatusBadge status={u.status} />
+                      </div>
+                      <div className="map-explorer-item-title">{u.name || u.unit_name || u.unit_code}</div>
+                      <div className="map-explorer-item-sub">{u.unit_type} • {u.team || 'SAR Quick Response'}</div>
+                      <div className="map-explorer-item-loc">
+                        <MapPin size={11} />
+                        <span>{u.station_name || 'Polar Sector Base'}</span>
+                      </div>
+                      <div className="map-explorer-item-coords">
+                        {formatPolarCoords(u.latitude, u.longitude)}
                       </div>
                     </div>
                   );
@@ -553,6 +659,13 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                 <span>Stations ({stations.length})</span>
               </button>
               <button
+                className={`map-layer-btn ${showUnits ? 'active' : ''}`}
+                onClick={() => setShowUnits(!showUnits)}
+              >
+                <ShieldAlert size={13} />
+                <span>Units ({responseUnits.length})</span>
+              </button>
+              <button
                 className={`map-layer-btn emergency-btn ${emergencyOnly ? 'active' : ''}`}
                 onClick={() => setEmergencyOnly(!emergencyOnly)}
               >
@@ -584,9 +697,13 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
               selectedEntity={selectedEntity}
               movementHistory={movementHistory}
               onSelectEntity={handleSelectEntity}
+              onOpenFullDossier={(id) => setFullDossierPersonId(id)}
+              onOpenCargoManifest={(id) => setFullCargoModalId(id)}
+              onFocusEntity={(entity) => handleSelectEntity({ ...entity, _focus: true, _focusKey: Date.now() })}
               showPersonnel={showPersonnel}
               showStations={showStations}
               showCargo={showCargo}
+              showUnits={showUnits}
               emergencyOnly={emergencyOnly}
               resetTrigger={resetTrigger}
             />
@@ -702,6 +819,34 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                   </div>
                 )}
 
+                {/* Specific Response Unit Fields */}
+                {selectedEntity.type === 'response_unit' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Unit Type:</span>
+                      <strong style={{ color: 'var(--cyan-300)' }}>{selectedEntity.unit_type}</strong>
+                    </div>
+                    {selectedEntity.operational_radius_km && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Operational Radius:</span>
+                        <span style={{ color: '#fff' }}>{selectedEntity.operational_radius_km} km</span>
+                      </div>
+                    )}
+                    {selectedEntity.speed_knots && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Speed:</span>
+                        <span style={{ color: '#fff' }}>{selectedEntity.speed_knots} knots</span>
+                      </div>
+                    )}
+                    {selectedEntity.contact_frequency && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Comms / Frequency:</span>
+                        <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{selectedEntity.contact_frequency}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Specific Cargo Fields */}
                 {selectedEntity.type === 'cargo' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
@@ -746,24 +891,34 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
 
                 {/* Action Buttons */}
                 <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                  {selectedEntity.type === 'personnel' && onSelectPersonnel && (
+                  {selectedEntity.type === 'personnel' && (
                     <button
                       className="btn-primary"
                       style={{ flex: 1, padding: '8px', fontSize: '12px', justifyContent: 'center' }}
-                      onClick={() => onSelectPersonnel(selectedEntity)}
+                      onClick={() => setFullDossierPersonId(selectedPersonnelDetail?.id || selectedEntity.id)}
                     >
                       <Eye size={13} style={{ display: 'inline', marginRight: '4px' }} />
                       Open Full Dossier
                     </button>
                   )}
-                  {selectedEntity.type === 'cargo' && onSelectCargo && (
+                  {selectedEntity.type === 'cargo' && (
                     <button
                       className="btn-primary"
                       style={{ flex: 1, padding: '8px', fontSize: '12px', justifyContent: 'center' }}
-                      onClick={() => onSelectCargo(selectedEntity)}
+                      onClick={() => setFullCargoModalId(selectedEntity.id)}
                     >
                       <Box size={13} style={{ display: 'inline', marginRight: '4px' }} />
                       View Cargo Manifest
+                    </button>
+                  )}
+                  {selectedEntity.type === 'response_unit' && (
+                    <button
+                      className="btn-primary"
+                      style={{ flex: 1, padding: '8px', fontSize: '12px', justifyContent: 'center' }}
+                      onClick={() => handleSelectEntity({ ...selectedEntity, _focus: true, _focusKey: Date.now() })}
+                    >
+                      <Navigation size={13} style={{ display: 'inline', marginRight: '4px' }} />
+                      Focus Unit on Map
                     </button>
                   )}
                 </div>
@@ -772,6 +927,23 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
           )}
         </div>
       </div>
+
+      {/* Full Personnel Record Dossier Drawer Overlay (preserves Map position/zoom/filters on close) */}
+      {fullDossierPersonId && (
+        <PersonnelDetailDrawer
+          personId={fullDossierPersonId}
+          onClose={() => setFullDossierPersonId(null)}
+        />
+      )}
+
+      {/* Full Cargo Manifest Modal (preserves Map position/zoom/filters on close) */}
+      {fullCargoModalId && (
+        <CargoDetailModal
+          cargoId={fullCargoModalId}
+          isOpen={true}
+          onClose={() => setFullCargoModalId(null)}
+        />
+      )}
     </div>
   );
 }
