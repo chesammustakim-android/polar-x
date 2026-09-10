@@ -16,6 +16,9 @@
   --bg-card-hover: rgba(22, 36, 66, 0.95);
   --bg-glass: rgba(15, 23, 42, 0.72);
   --bg-glass-heavy: rgba(10, 15, 29, 0.92);
+  --surface-panel: #0c1427;
+  --surface-panel-solid: #0c1427;
+  --surface-card: #0f1c38;
 
   /* Polar Accents & Glows */
   --cyan-100: #e0f2fe;

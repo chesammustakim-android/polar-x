@@ -126,7 +126,16 @@ function MapController({ selectedEntity, resetTrigger, defaultCenter, defaultZoo
 
   useEffect(() => {
     if (selectedEntity && selectedEntity.latitude != null && selectedEntity.longitude != null) {
-      const targetZoom = selectedEntity._focus ? Math.max(map.getZoom(), 8) : Math.max(map.getZoom(), 7);
+      // _focus means an explicit "Focus Unit" action — zoom close enough to reveal from clusters
+      // For response_unit type with _focus, go to zoom 10; otherwise stay at or above 7
+      let targetZoom;
+      if (selectedEntity._focus && selectedEntity.type === 'response_unit') {
+        targetZoom = Math.max(map.getZoom(), 10);
+      } else if (selectedEntity._focus) {
+        targetZoom = Math.max(map.getZoom(), 9);
+      } else {
+        targetZoom = Math.max(map.getZoom(), 7);
+      }
       map.flyTo([selectedEntity.latitude, selectedEntity.longitude], targetZoom, {
         duration: 1.2,
         easeLinearity: 0.25
@@ -334,10 +343,17 @@ export default function PolarMap({
     return list;
   }, [filteredStations, filteredPersonnel, filteredCargo, filteredIncidents, filteredResponseUnits]);
 
-  // Group entities into proximity clusters
+  // Group entities into proximity clusters (threshold shrinks as zoom increases)
   const clusters = useMemo(() => {
-    return groupMarkersIntoClusters(allVisibleEntities, 0.05);
-  }, [allVisibleEntities]);
+    // At high zoom levels, use tiny threshold so markers near each other are shown individually
+    // At low zoom, use larger threshold to group distant markers into clusters
+    let threshold;
+    if (currentZoom >= 10) threshold = 0.003;
+    else if (currentZoom >= 8) threshold = 0.01;
+    else if (currentZoom >= 6) threshold = 0.03;
+    else threshold = 0.05;
+    return groupMarkersIntoClusters(allVisibleEntities, threshold);
+  }, [allVisibleEntities, currentZoom]);
 
   // Auto-expand cluster if selectedEntity is inside it
   useEffect(() => {
@@ -631,26 +647,104 @@ export default function PolarMap({
           onZoomChange={(z) => setCurrentZoom(z)}
         />
 
-        {/* Subtle Command-Center Station Location Labels */}
-        {showStations && currentZoom >= 3 && filteredStations.map((st) => {
-          if (st.latitude == null || st.longitude == null || isNaN(st.latitude) || isNaN(st.longitude)) return null;
-          return (
-            <Marker
-              key={`st-lbl-${st.id}`}
-              position={[st.latitude, st.longitude]}
-              icon={L.divIcon({
-                className: 'station-label-div-icon',
-                html: `<div class="station-map-label ${currentZoom >= 5 ? 'visible' : 'compact'}">
-                  <span class="station-label-name">${st.name}</span>
-                  ${currentZoom >= 6 && st.region ? `<span class="station-label-region">${st.region}</span>` : ''}
-                </div>`,
-                iconSize: [140, 24],
-                iconAnchor: [70, -14]
-              })}
-              interactive={false}
-            />
+        {/* Hierarchical Geographic Labels — zoom-dependent, one level shown at a time */}
+        {showStations && (() => {
+          const stationsWithCoords = filteredStations.filter(
+            st => st.latitude != null && st.longitude != null &&
+                  !isNaN(st.latitude) && !isNaN(st.longitude)
           );
-        })}
+          if (stationsWithCoords.length === 0) return null;
+
+          // Parse existing DB region strings like "Antarctica - Queen Maud Land" → {continent, subregion}
+          const parseParts = (regionStr) => {
+            if (!regionStr) return { continent: 'Polar Operations', subregion: null };
+            const sep = regionStr.indexOf(' - ');
+            if (sep >= 0) return { continent: regionStr.slice(0, sep).trim(), subregion: regionStr.slice(sep + 3).trim() };
+            return { continent: regionStr.trim(), subregion: null };
+          };
+
+          // Average lat/lng of a list of stations
+          const groupCenter = (sts) => [
+            sts.reduce((s, st) => s + st.latitude, 0) / sts.length,
+            sts.reduce((s, st) => s + st.longitude, 0) / sts.length
+          ];
+
+          // ZOOM < 3 → broad continent / country labels only
+          if (currentZoom < 3) {
+            const groups = {};
+            stationsWithCoords.forEach(st => {
+              const { continent } = parseParts(st.region);
+              if (!groups[continent]) groups[continent] = [];
+              groups[continent].push(st);
+            });
+            return Object.entries(groups).map(([name, sts]) => {
+              const [lat, lng] = groupCenter(sts);
+              return (
+                <Marker
+                  key={`geo-cont-${name}`}
+                  position={[lat, lng]}
+                  icon={L.divIcon({
+                    className: 'station-label-div-icon',
+                    html: `<div class="geo-label geo-label-continent">${name}</div>`,
+                    iconSize: [180, 28],
+                    iconAnchor: [90, 14]
+                  })}
+                  interactive={false}
+                />
+              );
+            });
+          }
+
+          // ZOOM 3–5 → sub-region / territory labels
+          if (currentZoom < 5) {
+            const groups = {};
+            stationsWithCoords.forEach(st => {
+              const { continent, subregion } = parseParts(st.region);
+              const key = subregion || continent;
+              if (!groups[key]) groups[key] = [];
+              groups[key].push(st);
+            });
+            return Object.entries(groups).map(([name, sts]) => {
+              const [lat, lng] = groupCenter(sts);
+              return (
+                <Marker
+                  key={`geo-reg-${name}`}
+                  position={[lat, lng]}
+                  icon={L.divIcon({
+                    className: 'station-label-div-icon',
+                    html: `<div class="geo-label geo-label-region">${name}</div>`,
+                    iconSize: [170, 24],
+                    iconAnchor: [85, 12]
+                  })}
+                  interactive={false}
+                />
+              );
+            });
+          }
+
+          // ZOOM 5–7 → compact individual station names
+          // ZOOM ≥ 7  → full station names + sub-region tag
+          return stationsWithCoords.map(st => {
+            const full = currentZoom >= 7;
+            const { subregion } = parseParts(st.region);
+            return (
+              <Marker
+                key={`st-lbl-${st.id}`}
+                position={[st.latitude, st.longitude]}
+                icon={L.divIcon({
+                  className: 'station-label-div-icon',
+                  html: `<div class="station-map-label ${full ? 'visible' : 'compact'}">
+                    <span class="station-label-name">${st.name}</span>
+                    ${full && subregion ? `<span class="station-label-region">${subregion}</span>` : ''}
+                  </div>`,
+                  iconSize: [160, full ? 40 : 24],
+                  iconAnchor: [80, full ? 20 : 12]
+                })}
+                interactive={false}
+              />
+            );
+          });
+        })()}
 
         {/* Render Clusters & Spiderfied Markers */}
         {clusters.map((cluster) => {

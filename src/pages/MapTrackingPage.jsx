@@ -616,7 +616,7 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, init
                       <div className="map-explorer-item-sub">{u.unit_type} • {u.team || 'SAR Quick Response'}</div>
                       <div className="map-explorer-item-loc">
                         <MapPin size={11} />
-                        <span>{u.station_name || 'Polar Sector Base'}</span>
+                        <span>{u.current_location || 'Polar Sector Base'}</span>
                       </div>
                       <div className="map-explorer-item-coords">
                         {formatPolarCoords(u.latitude, u.longitude)}
