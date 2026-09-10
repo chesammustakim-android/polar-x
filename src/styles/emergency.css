@@ -226,7 +226,7 @@
   inset: 0;
   background: rgba(0,0,0,0.65);
   backdrop-filter: blur(3px);
-  z-index: 200;
+  z-index: 2000;
   animation: fadeInOverlay 0.2s ease;
 }
 @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
@@ -238,7 +238,7 @@
   max-width: 95vw;
   background: var(--surface-card, #111827);
   border-left: 1px solid var(--border-subtle);
-  z-index: 201;
+  z-index: 2001;
   display: flex;
   flex-direction: column;
   overflow: hidden;

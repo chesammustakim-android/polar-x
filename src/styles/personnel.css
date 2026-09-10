@@ -133,6 +133,11 @@
   transition: border-color 0.2s;
 }
 .prs-filter-select:focus { border-color: var(--cyan-500); color: #fff; }
+.prs-filter-select option,
+.prs-form-select option {
+  background: #0f172a;
+  color: #f1f5f9;
+}
 
 /* ---- PERSONNEL TABLE ---- */
 .prs-table-row {
@@ -228,7 +233,7 @@
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.55);
-  z-index: 200;
+  z-index: 2000;
   display: flex;
   justify-content: flex-end;
 }

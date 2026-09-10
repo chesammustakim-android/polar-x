@@ -1113,7 +1113,7 @@ export default function InventoryPage() {
                           {item.unit}
                         </td>
                         <td>
-                          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }} title={item.location}>
+                          <span className="item-location-cell" title={item.location}>
                             {item.location}
                           </span>
                         </td>

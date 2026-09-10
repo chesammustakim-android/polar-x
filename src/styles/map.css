@@ -453,7 +453,7 @@
 }
 .map-marker-pin:hover {
   transform: scale(1.2);
-  z-index: 1000 !important;
+  z-index: 50;
 }
 
 /* Personnel Marker Styles */

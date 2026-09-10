@@ -31,7 +31,7 @@ import {
   INVENTORY_RESOURCES as DEFAULT_INVENTORY 
 } from '../data/mockData';
 
-export default function DashboardPage({ onNavigateTab, onSelectAlert, onSelectCargo, onSelectPersonnel }) {
+export default function DashboardPage({ onNavigateTab, onSelectAlert, onSelectCargo, onSelectPersonnel, onNavigateToMapWithEntity }) {
   const [stats, setStats] = useState(DEFAULT_STATS);
   const [expedition, setExpedition] = useState(DEFAULT_EXPEDITIONS[0]);
   const [alerts, setAlerts] = useState(DEFAULT_ALERTS);
@@ -330,7 +330,13 @@ export default function DashboardPage({ onNavigateTab, onSelectAlert, onSelectCa
               </button>
             </div>
             <div className="panel-body" style={{ padding: '12px' }}>
-              <PolarMapPanel onSelectMarker={(marker) => onNavigateTab('map')} />
+              <PolarMapPanel onSelectMarker={(marker) => {
+                if (onNavigateToMapWithEntity) {
+                  onNavigateToMapWithEntity(marker);
+                } else {
+                  onNavigateTab('map');
+                }
+              }} />
             </div>
           </div>
         </div>

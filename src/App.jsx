@@ -37,6 +37,8 @@ export default function App() {
   const [selectedPerson, setSelectedPerson] = useState(null);
   // Expedition-scoped navigation filter (set when jumping from Expeditions page)
   const [expeditionNavFilter, setExpeditionNavFilter] = useState(null);
+  // Map-scoped navigation filter/focus (set when clicking radar marker from Dashboard)
+  const [mapInitialEntity, setMapInitialEntity] = useState(null);
 
   useEffect(() => {
     // Check existing stored authentication session
@@ -260,6 +262,7 @@ export default function App() {
           <MapTrackingPage 
             onSelectPersonnel={(person) => setSelectedPerson(person)}
             onSelectCargo={(cargo) => setSelectedCargo(cargo)}
+            initialSelectedEntity={mapInitialEntity}
           />
         );
       case 'emergency':
@@ -276,7 +279,16 @@ export default function App() {
       case 'settings':
         return <SettingsPage currentUser={currentUser} />;
       default:
-        return <DashboardPage onNavigateTab={setActiveTab} />;
+        return (
+          <DashboardPage 
+            onNavigateTab={(tab) => { setMapInitialEntity(null); setActiveTab(tab); }}
+            onSelectAlert={handleOpenAlert}
+            onNavigateToMapWithEntity={(entity) => {
+              setMapInitialEntity(entity);
+              setActiveTab('map');
+            }}
+          />
+        );
     }
   };
 

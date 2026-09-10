@@ -18,7 +18,7 @@ function getLocationFreshness(lastUpdatedStr) {
   return { label: 'STALE', cls: 'stale' };
 }
 
-export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo }) {
+export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo, initialSelectedEntity }) {
   // Data states from API
   const [personnel, setPersonnel] = useState([]);
   const [stations, setStations] = useState([]);
@@ -89,6 +89,36 @@ export default function MapTrackingPage({ onSelectPersonnel, onSelectCargo }) {
   useEffect(() => {
     loadMapData();
   }, [loadMapData]);
+
+  // Handle initial selected entity from Dashboard radar actions
+  useEffect(() => {
+    if (initialSelectedEntity) {
+      const lat = initialSelectedEntity.lat ?? initialSelectedEntity.latitude;
+      const lng = initialSelectedEntity.lng ?? initialSelectedEntity.longitude;
+      const name = initialSelectedEntity.name || '';
+
+      if (lat != null && lng != null) {
+        const matchingStation = stations.find(s => 
+          (s.name && name && s.name.toLowerCase().includes(name.toLowerCase().replace(' station', '').replace(' depot', ''))) ||
+          (Math.abs((s.latitude || 0) - lat) < 0.1 && Math.abs((s.longitude || 0) - lng) < 0.1)
+        );
+
+        if (matchingStation) {
+          setSelectedEntity({ ...matchingStation, type: 'station' });
+        } else {
+          setSelectedEntity({
+            id: initialSelectedEntity.id || 'radar-pin',
+            name: name || 'Polar Radar Track',
+            latitude: lat,
+            longitude: lng,
+            type: initialSelectedEntity.type || 'station',
+            status: (initialSelectedEntity.status || 'OPERATIONAL').toUpperCase(),
+            location_name: name
+          });
+        }
+      }
+    }
+  }, [initialSelectedEntity, stations]);
 
   // Handle entity selection and load historical movement trail
   const handleSelectEntity = async (entity) => {

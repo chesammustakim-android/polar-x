@@ -16,6 +16,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { SYSTEM_META } from '../../data/mockData';
+import { api } from '../../services/api';
 
 const ROLE_PERMISSIONS = {
   ADMIN: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'settings'],
@@ -27,12 +28,24 @@ const ROLE_PERMISSIONS = {
 };
 
 export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleCollapse, criticalAlertCount = 2, currentUser }) {
+  const [personnelCount, setPersonnelCount] = React.useState(null);
+
+  React.useEffect(() => {
+    api.getPersonnelSummary()
+      .then(res => {
+        if (res && res.total_personnel != null) {
+          setPersonnelCount(res.total_personnel);
+        }
+      })
+      .catch(() => {});
+  }, [activeTab]);
+
   const allNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'expeditions', label: 'Expeditions', icon: Flag, badge: '3' },
     { id: 'cargo', label: 'Cargo & Assets', icon: Box },
     { id: 'inventory', label: 'Inventory', icon: Boxes },
-    { id: 'personnel', label: 'Personnel', icon: Users, badge: '86' },
+    { id: 'personnel', label: 'Personnel', icon: Users, badge: personnelCount != null ? String(personnelCount) : null },
     { id: 'map', label: 'Map & Tracking', icon: MapPin },
     { id: 'emergency', label: 'Emergency Response', icon: AlertTriangle, badge: criticalAlertCount > 0 ? `${criticalAlertCount} SOS` : null, badgeClass: 'danger' },
     { id: 'automation', label: 'Smart Operations', icon: Cpu },
