@@ -489,6 +489,90 @@ export const api = {
     return await handleResponse(res);
   },
 
+  async updateStation(stationId, stationData) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stationData)
+    });
+    return await handleResponse(res);
+  },
+
+  async deactivateStation(stationId) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/deactivate`, {
+      method: 'PATCH'
+    });
+    return await handleResponse(res);
+  },
+
+  async reactivateStation(stationId) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/reactivate`, {
+      method: 'PATCH'
+    });
+    return await handleResponse(res);
+  },
+
+  // Station Resource Requirements
+  async getStationRequirements(stationId, activeOnly = true) {
+    try {
+      const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/requirements?active_only=${activeOnly}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn(`[POLAR-X API] Failed to fetch requirements for station ${stationId}:`, err.message);
+      return [];
+    }
+  },
+
+  async createStationRequirement(stationId, reqData) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/requirements`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqData)
+    });
+    return await handleResponse(res);
+  },
+
+  async updateStationRequirement(stationId, reqId, reqData) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/requirements/${reqId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqData)
+    });
+    return await handleResponse(res);
+  },
+
+  async deactivateStationRequirement(stationId, reqId) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/requirements/${reqId}`, {
+      method: 'DELETE'
+    });
+    return await handleResponse(res);
+  },
+
+  // Station Daily Consumption Registry
+  async getStationConsumption(stationId, filters = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (filters.start_date) params.append('start_date', filters.start_date);
+      if (filters.end_date) params.append('end_date', filters.end_date);
+      if (filters.limit) params.append('limit', String(filters.limit));
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/consumption${qs}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn(`[POLAR-X API] Failed to fetch consumption for station ${stationId}:`, err.message);
+      return [];
+    }
+  },
+
+  async createDailyConsumption(stationId, data) {
+    const res = await authFetch(`${BASE_URL}/api/stations/${stationId}/consumption`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await handleResponse(res);
+  },
+
   // ─── TASK 7: Emergency Incidents ───────────────────────────────────────────
 
   async getIncidents(filters = {}) {

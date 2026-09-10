@@ -34,6 +34,13 @@ DEMO_ACCOUNTS = [
         "station": "43rd ISEA Operations"
     },
     {
+        "username": "head.maitri",
+        "full_name": "Dr. Tenzing Norbu",
+        "role": "STATION_HEAD",
+        "role_description": "Maitri Base Station Commander",
+        "station": "Maitri Station"
+    },
+    {
         "username": "logistics",
         "full_name": "Lt. Cdr. Priya Nair",
         "role": "LOGISTICS_OFFICER",
@@ -94,7 +101,8 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
     token_data = {
         "sub": user.username,
         "user_id": user.id,
-        "role": user.role
+        "role": user.role,
+        "assigned_station_id": user.assigned_station_id
     }
     access_token = create_access_token(token_data)
 
@@ -106,6 +114,8 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
         role=user.role,
         active=user.active,
         station=user.station or "Maitri Station",
+        assigned_station_id=user.assigned_station_id,
+        assigned_station_name=user.assigned_station.name if user.assigned_station else user.station,
         created_at=user.created_at,
         last_login=user.last_login,
         permissions=get_role_permissions(user.role)
@@ -140,6 +150,8 @@ def get_current_user_profile(current_user: models.User = Depends(get_current_use
         role=current_user.role,
         active=current_user.active,
         station=current_user.station or "Maitri Station",
+        assigned_station_id=current_user.assigned_station_id,
+        assigned_station_name=current_user.assigned_station.name if current_user.assigned_station else current_user.station,
         created_at=current_user.created_at,
         last_login=current_user.last_login,
         permissions=get_role_permissions(current_user.role)

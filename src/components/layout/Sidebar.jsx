@@ -13,14 +13,16 @@ import {
   ChevronLeft, 
   ChevronRight,
   Radio,
-  Cpu
+  Cpu,
+  Building
 } from 'lucide-react';
 import { SYSTEM_META } from '../../data/mockData';
 import { api } from '../../services/api';
 
 const ROLE_PERMISSIONS = {
-  ADMIN: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'settings'],
-  EXPEDITION_DIRECTOR: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation'],
+  ADMIN: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'stations', 'settings'],
+  EXPEDITION_DIRECTOR: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'stations'],
+  STATION_HEAD: ['dashboard', 'stations', 'inventory', 'map'],
   LOGISTICS_OFFICER: ['dashboard', 'cargo', 'inventory', 'expeditions', 'reports', 'map', 'automation'],
   EXPEDITION_LEADER: ['dashboard', 'expeditions', 'personnel', 'map', 'emergency', 'reports', 'automation'],
   SAR_OFFICER: ['dashboard', 'emergency', 'map', 'personnel', 'reports', 'automation'],
@@ -43,6 +45,7 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
   const allNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'expeditions', label: 'Expeditions', icon: Flag, badge: '3' },
+    { id: 'stations', label: currentUser?.role === 'STATION_HEAD' ? 'Station Command' : 'Station Management', icon: Building },
     { id: 'cargo', label: 'Cargo & Assets', icon: Box },
     { id: 'inventory', label: 'Inventory', icon: Boxes },
     { id: 'personnel', label: 'Personnel', icon: Users, badge: personnelCount != null ? String(personnelCount) : null },

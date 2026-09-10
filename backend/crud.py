@@ -1877,8 +1877,10 @@ def create_or_get_personnel_sos_incident(
 
 # --- STATIONS CRUD ---
 
-def get_stations_list(db: Session, type: str = None, region: str = None):
+def get_stations_list(db: Session, type: str = None, region: str = None, include_inactive: bool = True):
     query = db.query(models.Station)
+    if not include_inactive:
+        query = query.filter(models.Station.status != "INACTIVE")
     if type and type.upper() != "ALL":
         query = query.filter(models.Station.type.ilike(f"%{type}%"))
     if region and region.upper() != "ALL":
@@ -1900,6 +1902,184 @@ def create_station(db: Session, station: schemas.StationCreate):
     db.commit()
     db.refresh(db_st)
     return db_st
+
+def update_station(db: Session, station_id: int, station_update: schemas.StationUpdate):
+    st = get_station(db, station_id)
+    if not st:
+        return None
+    update_data = station_update.model_dump(exclude_unset=True)
+    for field, val in update_data.items():
+        if val is not None:
+            setattr(st, field, val)
+    db.commit()
+    db.refresh(st)
+    return st
+
+def deactivate_station(db: Session, station_id: int):
+    st = get_station(db, station_id)
+    if not st:
+        return None
+    st.status = "INACTIVE"
+    db.commit()
+    db.refresh(st)
+    return st
+
+def reactivate_station(db: Session, station_id: int):
+    st = get_station(db, station_id)
+    if not st:
+        return None
+    st.status = "OPERATIONAL"
+    db.commit()
+    db.refresh(st)
+    return st
+
+
+# --- STATION RESOURCE REQUIREMENTS (PASS 1) ---
+def get_station_requirements(db: Session, station_id: int, active_only: bool = True):
+    query = db.query(models.StationResourceRequirement).filter(
+        models.StationResourceRequirement.station_id == station_id
+    )
+    if active_only:
+        query = query.filter(models.StationResourceRequirement.is_active == True)
+    return query.order_by(models.StationResourceRequirement.id.asc()).all()
+
+def get_station_requirement_by_resource(db: Session, station_id: int, item_code: str, active_only: bool = True):
+    query = db.query(models.StationResourceRequirement).filter(
+        models.StationResourceRequirement.station_id == station_id,
+        models.StationResourceRequirement.item_code == item_code
+    )
+    if active_only:
+        query = query.filter(models.StationResourceRequirement.is_active == True)
+    return query.first()
+
+def create_station_requirement(db: Session, station_id: int, req: schemas.StationResourceRequirementCreate):
+    if req.minimum_quantity < 0:
+        raise ValueError("Minimum quantity must be non-negative (>= 0).")
+    
+    st = get_station(db, station_id)
+    if not st:
+        raise ValueError(f"Station with ID {station_id} does not exist.")
+    
+    inv = db.query(models.Inventory).filter(models.Inventory.item_code == req.item_code).first()
+    if not inv:
+        raise ValueError(f"Resource with item code '{req.item_code}' does not exist in inventory.")
+    
+    existing = get_station_requirement_by_resource(db, station_id, req.item_code, active_only=True)
+    if existing:
+        raise ValueError(f"Active requirement already exists for station '{st.name}' and resource '{req.item_code}'.")
+    
+    timestamp = get_current_timestamp()
+    item_name = req.item_name or inv.item_name
+    unit = req.unit or inv.unit or "Units"
+    
+    db_req = models.StationResourceRequirement(
+        station_id=station_id,
+        item_code=req.item_code,
+        item_name=item_name,
+        minimum_quantity=float(req.minimum_quantity),
+        unit=unit,
+        is_active=True,
+        created_at=timestamp,
+        updated_at=timestamp
+    )
+    db.add(db_req)
+    db.commit()
+    db.refresh(db_req)
+    return db_req
+
+def update_station_requirement(db: Session, req_id: int, req_update: schemas.StationResourceRequirementUpdate):
+    req = db.query(models.StationResourceRequirement).filter(models.StationResourceRequirement.id == req_id).first()
+    if not req:
+        return None
+    
+    data = req_update.model_dump(exclude_unset=True)
+    if "minimum_quantity" in data and data["minimum_quantity"] is not None:
+        if data["minimum_quantity"] < 0:
+            raise ValueError("Minimum quantity must be non-negative (>= 0).")
+        req.minimum_quantity = float(data["minimum_quantity"])
+    if "unit" in data and data["unit"] is not None:
+        req.unit = data["unit"]
+    if "item_name" in data and data["item_name"] is not None:
+        req.item_name = data["item_name"]
+    if "is_active" in data and data["is_active"] is not None:
+        req.is_active = data["is_active"]
+    
+    req.updated_at = get_current_timestamp()
+    db.commit()
+    db.refresh(req)
+    return req
+
+def deactivate_station_requirement(db: Session, req_id: int):
+    req = db.query(models.StationResourceRequirement).filter(models.StationResourceRequirement.id == req_id).first()
+    if not req:
+        return None
+    req.is_active = False
+    req.updated_at = get_current_timestamp()
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+# --- DAILY CONSUMPTION REGISTRY (PASS 1) ---
+def create_daily_consumption(db: Session, station_id: int, data: schemas.DailyConsumptionRecordCreate, user_id: int = None, username: str = "Station Officer"):
+    if data.consumed_quantity < 0:
+        raise ValueError("Consumed quantity must be non-negative (>= 0).")
+    
+    st = get_station(db, station_id)
+    if not st:
+        raise ValueError(f"Station with ID {station_id} does not exist.")
+    
+    inv = db.query(models.Inventory).filter(models.Inventory.item_code == data.item_code).first()
+    if not inv:
+        raise ValueError(f"Resource with item code '{data.item_code}' does not exist in inventory.")
+    
+    try:
+        from datetime import datetime
+        datetime.strptime(data.consumption_date, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Invalid date format '{data.consumption_date}'. Must be YYYY-MM-DD.")
+    
+    existing = db.query(models.DailyConsumptionRecord).filter(
+        models.DailyConsumptionRecord.station_id == station_id,
+        models.DailyConsumptionRecord.item_code == data.item_code,
+        models.DailyConsumptionRecord.consumption_date == data.consumption_date
+    ).first()
+    if existing:
+        raise ValueError(f"Consumption record already exists for station '{st.name}', resource '{data.item_code}', and date '{data.consumption_date}'.")
+    
+    timestamp = get_current_timestamp()
+    item_name = data.item_name or inv.item_name
+    unit = data.unit or inv.unit or "Units"
+    
+    db_rec = models.DailyConsumptionRecord(
+        station_id=station_id,
+        item_code=data.item_code,
+        item_name=item_name,
+        consumption_date=data.consumption_date,
+        consumed_quantity=float(data.consumed_quantity),
+        unit=unit,
+        notes=data.notes,
+        recorded_at=timestamp,
+        recorded_by_user_id=user_id,
+        recorded_by=username
+    )
+    db.add(db_rec)
+    db.commit()
+    db.refresh(db_rec)
+    return db_rec
+
+def get_station_consumption_history(db: Session, station_id: int, start_date: str = None, end_date: str = None, limit: int = 100):
+    query = db.query(models.DailyConsumptionRecord).filter(
+        models.DailyConsumptionRecord.station_id == station_id
+    )
+    if start_date:
+        query = query.filter(models.DailyConsumptionRecord.consumption_date >= start_date)
+    if end_date:
+        query = query.filter(models.DailyConsumptionRecord.consumption_date <= end_date)
+    return query.order_by(
+        models.DailyConsumptionRecord.consumption_date.desc(),
+        models.DailyConsumptionRecord.id.desc()
+    ).limit(limit).all()
 
 
 # --- DASHBOARD AGGREGATION ---
@@ -1957,6 +2137,17 @@ def get_dashboard_summary(db: Session):
 
 # --- SEED INITIAL DATA ---
 def seed_initial_data(db: Session):
+    # Ensure users table has assigned_station_id column in existing SQLite DBs before querying User model
+    try:
+        from sqlalchemy import text
+        res = db.execute(text("PRAGMA table_info(users)"))
+        columns = [row[1] for row in res.fetchall()]
+        if "assigned_station_id" not in columns:
+            db.execute(text("ALTER TABLE users ADD COLUMN assigned_station_id INTEGER REFERENCES stations(id)"))
+            db.commit()
+    except Exception:
+        db.rollback()
+
     # 1. Expeditions (At least 3)
     exp1 = db.query(models.Expedition).filter(models.Expedition.name.ilike("%Maitri%")).first()
     if not exp1:
@@ -2737,6 +2928,118 @@ def seed_initial_data(db: Session):
         ]
         db.add_all(users)
         db.commit()
+
+    # Ensure users table has assigned_station_id column in existing SQLite DBs
+    try:
+        from sqlalchemy import text
+        res = db.execute(text("PRAGMA table_info(users)"))
+        columns = [row[1] for row in res.fetchall()]
+        if "assigned_station_id" not in columns:
+            db.execute(text("ALTER TABLE users ADD COLUMN assigned_station_id INTEGER REFERENCES stations(id)"))
+            db.commit()
+    except Exception as e:
+        db.rollback()
+
+    # 10. Seed Station Head Accounts & Link Assigned Stations
+    from .auth import hash_password
+    dev_password_hash = hash_password("Polar@2026")
+    maitri_station = db.query(models.Station).filter(models.Station.name.ilike("%Maitri Station%")).first() or db.query(models.Station).filter(models.Station.name.ilike("%Maitri%")).first()
+    himadri_station = db.query(models.Station).filter(models.Station.name.ilike("%Himadri%")).first()
+    bharati_station = db.query(models.Station).filter(models.Station.name.ilike("%Bharati%")).first()
+
+    head_maitri = db.query(models.User).filter(models.User.username == "head.maitri").first()
+    if not head_maitri:
+        head_maitri = models.User(
+            username="head.maitri",
+            full_name="Dr. Tenzing Norbu",
+            email="head.maitri@ncpor.res.in",
+            password_hash=dev_password_hash,
+            role="STATION_HEAD",
+            active=True,
+            station=maitri_station.name if maitri_station else "Maitri Station",
+            assigned_station_id=maitri_station.id if maitri_station else None,
+            created_at="2026-08-01 00:00 UTC",
+            last_login="2026-09-02 08:30 UTC"
+        )
+        db.add(head_maitri)
+        db.commit()
+    elif maitri_station and not head_maitri.assigned_station_id:
+        head_maitri.assigned_station_id = maitri_station.id
+        db.commit()
+
+    head_himadri = db.query(models.User).filter(models.User.username == "head.himadri").first()
+    if not head_himadri:
+        head_himadri = models.User(
+            username="head.himadri",
+            full_name="Dr. Amit K. Verma",
+            email="head.himadri@ncpor.res.in",
+            password_hash=dev_password_hash,
+            role="STATION_HEAD",
+            active=True,
+            station=himadri_station.name if himadri_station else "Himadri Arctic Base",
+            assigned_station_id=himadri_station.id if himadri_station else None,
+            created_at="2026-08-01 00:00 UTC",
+            last_login="2026-09-02 08:30 UTC"
+        )
+        db.add(head_himadri)
+        db.commit()
+    elif himadri_station and not head_himadri.assigned_station_id:
+        head_himadri.assigned_station_id = himadri_station.id
+        db.commit()
+
+    # Seed baseline Station Resource Requirements (Himadri FUEL-003 1000L, FOOD-101 2500 Packs)
+    if db.query(models.StationResourceRequirement).count() == 0:
+        ts = "2026-08-20 08:00 UTC"
+        baseline_reqs = []
+        if himadri_station:
+            baseline_reqs.extend([
+                models.StationResourceRequirement(
+                    station_id=himadri_station.id,
+                    item_code="FUEL-003",
+                    item_name="Sub-Zero Snowcat Mobilite Gasoline",
+                    minimum_quantity=1000.0,
+                    unit="Litres",
+                    is_active=True,
+                    created_at=ts,
+                    updated_at=ts
+                ),
+                models.StationResourceRequirement(
+                    station_id=himadri_station.id,
+                    item_code="FOOD-101",
+                    item_name="Cryo-Dehydrated Emergency Meals",
+                    minimum_quantity=2500.0,
+                    unit="Packs",
+                    is_active=True,
+                    created_at=ts,
+                    updated_at=ts
+                )
+            ])
+        if maitri_station:
+            baseline_reqs.extend([
+                models.StationResourceRequirement(
+                    station_id=maitri_station.id,
+                    item_code="FUEL-001",
+                    item_name="Arctic Aviation Fuel (Jet A-1)",
+                    minimum_quantity=20000.0,
+                    unit="Litres",
+                    is_active=True,
+                    created_at=ts,
+                    updated_at=ts
+                ),
+                models.StationResourceRequirement(
+                    station_id=maitri_station.id,
+                    item_code="FOOD-101",
+                    item_name="Cryo-Dehydrated Emergency Meals",
+                    minimum_quantity=2500.0,
+                    unit="Packs",
+                    is_active=True,
+                    created_at=ts,
+                    updated_at=ts
+                )
+            ])
+        if baseline_reqs:
+            db.add_all(baseline_reqs)
+            db.commit()
 
     # 11. Seed System Settings (Task 11: System Configuration)
     default_settings_defs = [

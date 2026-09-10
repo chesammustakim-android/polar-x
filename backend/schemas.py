@@ -407,9 +407,75 @@ class StationBase(BaseModel):
 class StationCreate(StationBase):
     pass
 
+class StationUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    elevation: Optional[str] = None
+    status: Optional[str] = None
+    description: Optional[str] = None
+    region: Optional[str] = None
+
 class StationOut(StationBase):
     id: int
     created_at: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- STATION RESOURCE REQUIREMENTS SCHEMAS ---
+class StationResourceRequirementBase(BaseModel):
+    station_id: int
+    item_code: str
+    item_name: Optional[str] = None
+    minimum_quantity: float
+    unit: Optional[str] = "Units"
+    is_active: Optional[bool] = True
+
+class StationResourceRequirementCreate(BaseModel):
+    item_code: str
+    minimum_quantity: float
+    unit: Optional[str] = "Units"
+    item_name: Optional[str] = None
+
+class StationResourceRequirementUpdate(BaseModel):
+    minimum_quantity: Optional[float] = None
+    unit: Optional[str] = None
+    item_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class StationResourceRequirementOut(StationResourceRequirementBase):
+    id: int
+    station_name: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- DAILY CONSUMPTION REGISTRY SCHEMAS ---
+class DailyConsumptionRecordBase(BaseModel):
+    station_id: int
+    item_code: str
+    item_name: Optional[str] = None
+    consumption_date: str # YYYY-MM-DD
+    consumed_quantity: float
+    unit: Optional[str] = "Units"
+    notes: Optional[str] = None
+
+class DailyConsumptionRecordCreate(BaseModel):
+    item_code: str
+    consumption_date: str
+    consumed_quantity: float
+    unit: Optional[str] = "Units"
+    notes: Optional[str] = None
+    item_name: Optional[str] = None
+
+class DailyConsumptionRecordOut(DailyConsumptionRecordBase):
+    id: int
+    station_name: Optional[str] = None
+    recorded_at: str
+    recorded_by_user_id: Optional[int] = None
+    recorded_by: str
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -642,9 +708,11 @@ class UserBase(BaseModel):
     username: str
     full_name: str
     email: str
-    role: str = "FIELD_OPERATOR" # ADMIN, EXPEDITION_DIRECTOR, LOGISTICS_OFFICER, EXPEDITION_LEADER, SAR_OFFICER, FIELD_OPERATOR
+    role: str = "FIELD_OPERATOR" # ADMIN, EXPEDITION_DIRECTOR, LOGISTICS_OFFICER, EXPEDITION_LEADER, SAR_OFFICER, FIELD_OPERATOR, STATION_HEAD
     active: bool = True
     station: Optional[str] = "Maitri Station"
+    assigned_station_id: Optional[int] = None
+    assigned_station_name: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
@@ -671,6 +739,7 @@ class DemoUserOut(BaseModel):
     role: str
     role_description: str
     station: str
+    assigned_station_id: Optional[int] = None
 
 
 # --- SMART AUTOMATION & PREDICTIVE OPERATIONS SCHEMAS (TASK 10) ---

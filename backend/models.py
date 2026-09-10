@@ -212,6 +212,17 @@ class Station(Base):
     region = Column(String, nullable=True, default="Antarctica")
     created_at = Column(String, nullable=True)
 
+    resource_requirements = relationship(
+        "StationResourceRequirement",
+        back_populates="station",
+        cascade="all, delete-orphan"
+    )
+    consumption_records = relationship(
+        "DailyConsumptionRecord",
+        back_populates="station",
+        cascade="all, delete-orphan"
+    )
+
 
 class ResponseUnit(Base):
     __tablename__ = "response_units"
@@ -290,11 +301,57 @@ class User(Base):
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False, default="FIELD_OPERATOR") # ADMIN, EXPEDITION_DIRECTOR, LOGISTICS_OFFICER, EXPEDITION_LEADER, SAR_OFFICER, FIELD_OPERATOR
+    role = Column(String, nullable=False, default="FIELD_OPERATOR") # ADMIN, EXPEDITION_DIRECTOR, LOGISTICS_OFFICER, EXPEDITION_LEADER, SAR_OFFICER, FIELD_OPERATOR, STATION_HEAD
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(String, nullable=True)
     last_login = Column(String, nullable=True)
     station = Column(String, default="Maitri Station")
+    assigned_station_id = Column(Integer, ForeignKey("stations.id"), nullable=True)
+
+    assigned_station = relationship("Station", foreign_keys=[assigned_station_id])
+
+
+class StationResourceRequirement(Base):
+    """
+    Persisted minimum required quantities for specific inventory resources per station.
+    Ensures stations maintain required fuel, rations, medical, and spare buffers.
+    """
+    __tablename__ = "station_resource_requirements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    item_code = Column(String, nullable=False, index=True)
+    item_name = Column(String, nullable=True)
+    minimum_quantity = Column(Float, nullable=False, default=0.0)
+    unit = Column(String, nullable=True, default="Units")
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=True)
+
+    station = relationship("Station", back_populates="resource_requirements")
+
+
+class DailyConsumptionRecord(Base):
+    """
+    Daily persistent consumption registry for operational resources at polar stations.
+    Captures station, resource, date, quantity consumed, and recording user.
+    """
+    __tablename__ = "daily_consumption_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    item_code = Column(String, nullable=False, index=True)
+    item_name = Column(String, nullable=True)
+    consumption_date = Column(String, nullable=False, index=True) # YYYY-MM-DD
+    consumed_quantity = Column(Float, nullable=False, default=0.0)
+    unit = Column(String, nullable=True, default="Units")
+    recorded_at = Column(String, nullable=False)
+    recorded_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    recorded_by = Column(String, nullable=False, default="Station Officer")
+    notes = Column(String, nullable=True)
+
+    station = relationship("Station", back_populates="consumption_records")
+    user = relationship("User", foreign_keys=[recorded_by_user_id])
 
 
 class SystemSetting(Base):

@@ -12,6 +12,7 @@ import EmergencyPage from './pages/EmergencyPage';
 import ReportsPage from './pages/ReportsPage';
 import SmartAutomationPage from './pages/SmartAutomationPage';
 import SettingsPage from './pages/SettingsPage';
+import StationManagementPage from './pages/StationManagementPage';
 import QuickModal from './components/common/QuickModal';
 import StatusBadge from './components/common/StatusBadge';
 import { ShieldAlert, Box, Users, Radio, Check } from 'lucide-react';
@@ -213,7 +214,7 @@ export default function App() {
 
   // Role permissions check
   const allowedTabs = currentUser?.permissions || [
-    'dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'settings'
+    'dashboard', 'expeditions', 'stations', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'settings'
   ];
 
   const renderActivePage = () => {
@@ -284,6 +285,8 @@ export default function App() {
         return <SmartAutomationPage />;
       case 'reports':
         return <ReportsPage />;
+      case 'stations':
+        return <StationManagementPage currentUser={currentUser} />;
       case 'settings':
         return <SettingsPage currentUser={currentUser} />;
       default:

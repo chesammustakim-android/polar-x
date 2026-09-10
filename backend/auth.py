@@ -23,11 +23,14 @@ security_bearer = HTTPBearer(auto_error=False)
 ROLE_PERMISSIONS = {
     "ADMIN": [
         "dashboard", "expeditions", "cargo", "inventory", 
-        "personnel", "map", "emergency", "reports", "automation", "settings", "admin"
+        "personnel", "map", "emergency", "reports", "automation", "settings", "stations", "admin"
     ],
     "EXPEDITION_DIRECTOR": [
         "dashboard", "expeditions", "cargo", "inventory", 
-        "personnel", "map", "emergency", "reports", "automation"
+        "personnel", "map", "emergency", "reports", "automation", "stations"
+    ],
+    "STATION_HEAD": [
+        "dashboard", "stations", "inventory", "map"
     ],
     "LOGISTICS_OFFICER": [
         "dashboard", "cargo", "inventory", "expeditions", "reports", "map", "automation"

@@ -270,55 +270,84 @@ export default function LoginPage({ onLoginSuccess }) {
         </form>
 
         {/* Quick Demo Access Switcher */}
-        {demoUsers.length > 0 && (
-          <div
-            style={{
-              borderTop: '1px solid var(--border-subtle)',
-              paddingTop: '16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Quick Demo Role Switcher
-              </span>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                Pass: <code style={{ color: 'var(--cyan-300)' }}>Polar@2026</code>
+        <div
+          style={{
+            borderTop: '1px solid var(--border-subtle)',
+            paddingTop: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span
+                style={{
+                  fontSize: '9.5px',
+                  fontWeight: '800',
+                  letterSpacing: '0.8px',
+                  padding: '2px 7px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'rgba(234, 179, 8, 0.15)',
+                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                  color: '#facc15',
+                  fontFamily: 'var(--font-mono)'
+                }}
+              >
+                DEMO / DEVELOPMENT ONLY
               </span>
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-              {demoUsers.map((u) => {
-                const isSelected = username === u.username;
-                return (
-                  <button
-                    key={u.username}
-                    type="button"
-                    onClick={() => handleQuickFill(u)}
-                    style={{
-                      padding: '6px 8px',
-                      background: isSelected ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.03)',
-                      border: `1px solid ${isSelected ? 'var(--cyan-400)' : 'var(--border-subtle)'}`,
-                      borderRadius: 'var(--radius-sm)',
-                      color: isSelected ? '#fff' : 'var(--text-secondary)',
-                      fontSize: '10.5px',
-                      fontWeight: isSelected ? '700' : '500',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                      transition: 'all var(--transition-fast)'
-                    }}
-                    title={`${u.full_name} (${u.role_description})`}
-                  >
-                    <div>{u.role.replace('_', ' ')}</div>
-                    <div style={{ fontSize: '9.5px', color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)' }}>@{u.username}</div>
-                  </button>
-                );
-              })}
-            </div>
+            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+              Passcode: <code style={{ color: 'var(--cyan-300)', background: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: '3px' }}>Polar@2026</code>
+            </span>
           </div>
-        )}
+
+          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            Select a role credential to auto-fill authentication form:
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px' }}>
+            {(demoUsers.length > 0 ? demoUsers : [
+              { username: 'admin', role: 'ADMIN', full_name: 'Dr. Mukherjee' },
+              { username: 'director', role: 'EXPEDITION_DIRECTOR', full_name: 'Dr. Raman' },
+              { username: 'head.maitri', role: 'STATION_HEAD', full_name: 'Dr. Norbu' },
+              { username: 'logistics', role: 'LOGISTICS_OFFICER', full_name: 'Lt. Cdr. Nair' },
+              { username: 'leader', role: 'EXPEDITION_LEADER', full_name: 'Capt. Iyer' },
+              { username: 'sar', role: 'SAR_OFFICER', full_name: 'Lt. Col. Vikramaditya' },
+              { username: 'field', role: 'FIELD_OPERATOR', full_name: 'Dr. Sethi' }
+            ]).map((u) => {
+              const isSelected = username === u.username;
+              const isStationHead = u.role === 'STATION_HEAD';
+              return (
+                <button
+                  key={u.username}
+                  type="button"
+                  onClick={() => handleQuickFill(u)}
+                  style={{
+                    padding: '8px 6px',
+                    background: isSelected 
+                      ? 'rgba(56, 189, 248, 0.22)' 
+                      : isStationHead 
+                        ? 'rgba(16, 185, 129, 0.08)' 
+                        : 'rgba(255, 255, 255, 0.03)',
+                    border: `1px solid ${isSelected ? 'var(--cyan-400)' : isStationHead ? 'rgba(52, 211, 153, 0.3)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-sm)',
+                    color: isSelected ? '#fff' : 'var(--text-secondary)',
+                    fontSize: '10.5px',
+                    fontWeight: isSelected ? '700' : '500',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    transition: 'all var(--transition-fast)'
+                  }}
+                  title={`${u.full_name || u.username} (${(u.role_description || u.role)})`}
+                >
+                  <div style={{ color: isStationHead ? '#34d399' : undefined }}>{u.role.replace('_', ' ')}</div>
+                  <div style={{ fontSize: '9px', color: 'var(--cyan-400)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>@{u.username}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Security Footer */}
         <div
