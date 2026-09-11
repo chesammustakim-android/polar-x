@@ -20,11 +20,17 @@ import {
   Info,
   Eye,
   Building,
-  MapPin
+  MapPin,
+  Truck,
+  Calendar,
+  Clock,
+  TrendingDown,
+  ArrowUpRight
 } from 'lucide-react';
 import { api } from '../services/api';
 import StatusBadge from '../components/common/StatusBadge';
 import QuickModal from '../components/common/QuickModal';
+import { RequestTransferModal } from './InventoryPage';
 
 export default function SmartAutomationPage() {
   const [activeTab, setActiveTab] = useState('overview'); // overview, expeditions, inventory, cargo, personnel, emergency
@@ -40,8 +46,93 @@ export default function SmartAutomationPage() {
   const [personnelRisks, setPersonnelRisks] = useState([]);
   const [emergencyQueue, setEmergencyQueue] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [stationIntel, setStationIntel] = useState([]);
+  const [transfers, setTransfers] = useState([]);
+  const [stations, setStations] = useState([]);
+  const [transferModalTarget, setTransferModalTarget] = useState(null);
   const [actionFeedback, setActionFeedback] = useState(null);
   const [selectedExplainInv, setSelectedExplainInv] = useState(null);
+
+  const currentUser = api.getStoredUser();
+  const canRequestTransfer = currentUser && ['ADMIN', 'EXPEDITION_DIRECTOR', 'STATION_HEAD'].includes((currentUser.role || '').toUpperCase());
+
+  // Station Intelligence Map keyed by item_code
+  const intelByCode = React.useMemo(() => {
+    const map = {};
+    (stationIntel || []).forEach(si => {
+      if (!map[si.item_code] || (si.surplus_deficit < (map[si.item_code].surplus_deficit || 0))) {
+        map[si.item_code] = si;
+      }
+    });
+    return map;
+  }, [stationIntel]);
+
+  const pendingTransfers = React.useMemo(() => {
+    return (transfers || []).filter(t => t.status === 'REQUESTED' || t.status === 'APPROVED');
+  }, [transfers]);
+
+  const getProjectedBreachDate = (daysToMin, stock, min) => {
+    if (stock !== null && stock !== undefined && min !== null && min !== undefined && stock <= min) {
+      return 'Immediate (Breached)';
+    }
+    if (typeof daysToMin === 'number' && daysToMin === 0) {
+      return 'Immediate (Breached)';
+    }
+    if (typeof daysToMin === 'number' && daysToMin > 0) {
+      const target = new Date();
+      target.setDate(target.getDate() + daysToMin);
+      return target.toISOString().split('T')[0];
+    }
+    return null;
+  };
+
+  const getProjectedShortageDate = (runway, stock) => {
+    if (stock === 0) return 'Immediate (0 Stock)';
+    if (typeof runway === 'number' && runway > 0) {
+      const target = new Date();
+      target.setDate(target.getDate() + runway);
+      return target.toISOString().split('T')[0];
+    }
+    return null;
+  };
+
+  const getConciseWhyFlagged = (inv, si) => {
+    if (si && si.why_flagged && si.why_flagged.length > 0) {
+      return si.why_flagged[0];
+    }
+    if (inv && inv.why_flagged && inv.why_flagged.length > 0) {
+      return inv.why_flagged[0];
+    }
+    if (inv && inv.factors && inv.factors.length > 0) {
+      const neg = inv.factors.find(f => f.impact === 'NEGATIVE');
+      if (neg) return neg.description || neg.name;
+    }
+    const currentStock = si?.current_stock ?? inv.quantity;
+    const minQty = si?.minimum_quantity ?? inv.minimum_quantity;
+    if (currentStock <= minQty) return 'Current stock is below safety minimum reserve';
+    return 'Reserve within nominal parameters';
+  };
+
+  const handleOpenTransfer = (inv, si, preselectedDonor = null) => {
+    if (!canRequestTransfer) return;
+    const targetStationId = si?.station_id || currentUser?.assigned_station_id || (stations[0]?.id);
+    const targetStationName = si?.station_name || currentUser?.assigned_station_name || inv.station_name || 'Station';
+    const currentStock = si?.current_stock ?? inv.quantity;
+    const minQty = si?.minimum_quantity ?? inv.minimum_quantity;
+    const deficitVal = Math.max(0, minQty - currentStock);
+
+    setTransferModalTarget({
+      destStation: { id: targetStationId, name: targetStationName },
+      itemInfo: {
+        item_code: inv.item_code,
+        item_name: inv.item_name,
+        current_stock: currentStock,
+        minimum_quantity: minQty,
+        unit: inv.unit || 'Units',
+        surplus_deficit: -deficitVal
+      }
+    });
+  };
 
   // Load all analysis from backend
   const runLiveAnalysis = async (isManual = false) => {
@@ -50,14 +141,20 @@ export default function SmartAutomationPage() {
       else setLoading(true);
       setError(null);
 
-      const [sumRes, expRes, invRes, crgRes, persRes, emRes, recRes] = await Promise.all([
+      const user = api.getStoredUser();
+      const stationIdParam = user?.role === 'STATION_HEAD' ? user.assigned_station_id : null;
+
+      const [sumRes, expRes, invRes, crgRes, persRes, emRes, recRes, intelRes, transRes, stationsRes] = await Promise.all([
         api.getAutomationSummary(),
         api.getExpeditionReadinessAnalysis(),
         api.getInventoryRiskAnalysis(),
         api.getCargoRiskAnalysis(),
         api.getPersonnelRiskAnalysis(),
         api.getEmergencyPriorityQueue(),
-        api.getAutomationRecommendations()
+        api.getAutomationRecommendations(),
+        api.getStationInventoryIntelligence(stationIdParam).catch(() => []),
+        api.getTransfers().catch(() => []),
+        api.getStations().catch(() => [])
       ]);
 
       if (sumRes) setSummary(sumRes);
@@ -67,6 +164,9 @@ export default function SmartAutomationPage() {
       if (persRes) setPersonnelRisks(persRes);
       if (emRes) setEmergencyQueue(emRes);
       if (recRes) setRecommendations(recRes);
+      if (intelRes) setStationIntel(Array.isArray(intelRes) ? intelRes : []);
+      if (transRes) setTransfers(Array.isArray(transRes) ? transRes : []);
+      if (stationsRes) setStations(Array.isArray(stationsRes) ? stationsRes : []);
 
       if (isManual) {
         setActionFeedback('Live predictive analysis successfully re-evaluated against active database state.');
@@ -308,7 +408,7 @@ export default function SmartAutomationPage() {
         {[
           { id: 'overview', label: 'Executive Operations Overview', icon: Cpu },
           { id: 'expeditions', label: 'Expedition Readiness Analysis', icon: Compass, count: expeditionsAnalysis.length },
-          { id: 'inventory', label: 'Inventory Shortage Risks', icon: Boxes, count: inventoryRisks.length },
+          { id: 'inventory', label: 'Inventory Shortage Risks', icon: Boxes, count: inventoryRisks.length, pendingBadge: pendingTransfers.length > 0 ? `${pendingTransfers.length} pending` : null },
           { id: 'cargo', label: 'Cargo Transit Risks', icon: Package, count: cargoRisks.length },
           { id: 'personnel', label: 'Personnel Operational Safety', icon: Users, count: personnelRisks.length },
           { id: 'emergency', label: 'Emergency Urgency & SAR Recs', icon: ShieldAlert, count: emergencyQueue.length }
@@ -350,6 +450,23 @@ export default function SmartAutomationPage() {
                   }}
                 >
                   {tab.count}
+                </span>
+              )}
+              {tab.pendingBadge && (
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '1px 6px',
+                    borderRadius: '8px',
+                    background: 'rgba(139, 92, 246, 0.25)',
+                    color: '#c4b5fd',
+                    border: '1px solid rgba(139, 92, 246, 0.4)',
+                    fontWeight: '700'
+                  }}
+                  title="Active transfer requests pending review"
+                >
+                  {tab.pendingBadge}
                 </span>
               )}
             </button>
@@ -568,75 +685,209 @@ export default function SmartAutomationPage() {
       {/* ─── TAB 3: INVENTORY SHORTAGE RISKS ─── */}
       {activeTab === 'inventory' && (
         <div className="command-panel" style={{ padding: '20px' }}>
-          <div className="panel-header" style={{ marginBottom: '16px' }}>
+          <div className="panel-header" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div className="panel-title-group">
               <Boxes size={18} className="panel-title-icon" />
               <span className="panel-title">Inventory Shortage & Stockout Vulnerability Analysis</span>
             </div>
+            {pendingTransfers.length > 0 && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 14px',
+                  background: 'rgba(139, 92, 246, 0.12)',
+                  border: '1px solid rgba(139, 92, 246, 0.35)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: '11.5px',
+                  fontFamily: 'var(--font-mono)',
+                  color: '#c4b5fd'
+                }}
+              >
+                <Truck size={14} style={{ color: '#a78bfa' }} />
+                <span>Pending Cross-Station Transfers: <strong style={{ color: '#fff' }}>{pendingTransfers.length}</strong></span>
+              </div>
+            )}
           </div>
           <div className="polar-table-wrapper">
-            <table className="polar-table">
+            <table className="polar-table" style={{ minWidth: '1080px' }}>
               <thead>
                 <tr>
                   <th>Item Code</th>
                   <th>Resource</th>
                   <th>Station</th>
-                  <th>Stock vs Min</th>
+                  <th>Stock vs Min (Deficit)</th>
                   <th>Burn Rate (7d)</th>
                   <th>Trend</th>
-                  <th>Forecast / Runway</th>
-                  <th>Risk Score</th>
+                  <th>Runway & Breach</th>
+                  <th>Risk Level</th>
+                  <th>Why Flagged</th>
+                  <th>Eligible Donors</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {inventoryRisks.map(inv => {
-                  const isBreached = inv.quantity <= inv.minimum_quantity;
+                  const si = intelByCode[inv.item_code];
+                  const currentStock = si?.current_stock ?? inv.quantity;
+                  const minRequired = si?.minimum_quantity ?? inv.minimum_quantity;
+                  const isBreached = currentStock <= minRequired;
+                  const deficit = Math.max(0, minRequired - currentStock);
+                  const burnRateText = si?.burn_rate_text || inv.burn_rate_text || 'Insufficient history';
+                  const trend = si?.trend || inv.trend || 'INSUFFICIENT DATA';
+                  const daysToMin = si?.days_to_minimum !== undefined ? si.days_to_minimum : inv.days_to_minimum;
+                  const daysRunway = si?.days_remaining !== undefined ? si.days_remaining : inv.days_remaining;
+                  const projectedBreach = getProjectedBreachDate(daysToMin, currentStock, minRequired);
+                  const projectedShortage = getProjectedShortageDate(daysRunway, currentStock);
+                  const whyFlaggedText = getConciseWhyFlagged(inv, si);
+                  const donorRecs = (si && si.donor_recommendations) || [];
+                  const topDonor = donorRecs.length > 0 ? donorRecs[0] : null;
+                  const displayStation = si?.station_name || inv.station_name || 'Central Depot';
+
+                  const enrichedInv = {
+                    ...inv,
+                    current_stock: currentStock,
+                    minimum_quantity: minRequired,
+                    deficit,
+                    burn_rate_text: burnRateText,
+                    trend,
+                    days_to_minimum: daysToMin,
+                    days_remaining: daysRunway,
+                    projected_breach_date: projectedBreach,
+                    projected_shortage_date: projectedShortage,
+                    why_flagged: (si && si.why_flagged && si.why_flagged.length > 0) ? si.why_flagged : (inv.why_flagged && inv.why_flagged.length > 0 ? inv.why_flagged : [whyFlaggedText]),
+                    donor_recommendations: donorRecs,
+                    station_name: displayStation,
+                    station_id: si?.station_id || currentUser?.assigned_station_id
+                  };
+
                   return (
-                    <tr key={inv.inventory_id} onClick={() => setSelectedExplainInv(inv)} style={{ cursor: 'pointer' }}>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--cyan-300)' }}>
+                    <tr key={inv.inventory_id} onClick={() => setSelectedExplainInv(enrichedInv)} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: '700', color: 'var(--cyan-300)', whiteSpace: 'nowrap' }}>
                         {inv.item_code}
                       </td>
                       <td style={{ color: '#fff', fontWeight: '600' }}>
                         {inv.item_name}
                         <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{inv.category} • {inv.location}</div>
                       </td>
-                      <td style={{ color: 'var(--cyan-300)', fontSize: '12px' }}>
+                      <td style={{ color: 'var(--cyan-300)', fontSize: '12px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <Building size={12} style={{ color: 'var(--cyan-400)' }} />
-                          {inv.station_name || 'Expedition Central Depot'}
+                          {displayStation}
                         </div>
                       </td>
-                      <td style={{ fontFamily: 'var(--font-mono)' }}>
+                      <td style={{ fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
                         <span style={{ color: isBreached ? 'var(--hazard-red)' : '#fff', fontWeight: '700' }}>
-                          {inv.quantity} {inv.unit}
+                          {currentStock} {inv.unit}
                         </span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}> / {inv.minimum_quantity} {inv.unit}</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}> / {minRequired} {inv.unit}</span>
+                        {deficit > 0 ? (
+                          <div style={{ color: 'var(--hazard-red)', fontSize: '11px', fontWeight: '700', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <AlertTriangle size={11} /> Deficit: −{deficit} {inv.unit}
+                          </div>
+                        ) : (
+                          <div style={{ color: 'var(--hazard-green)', fontSize: '10px', marginTop: '2px' }}>
+                            Surplus: +{Math.max(0, currentStock - minRequired)} {inv.unit}
+                          </div>
+                        )}
                       </td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: inv.burn_rate_text && !inv.burn_rate_text.includes('Insufficient') ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
-                        {inv.burn_rate_text || 'Insufficient history'}
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: burnRateText && !burnRateText.includes('Insufficient') ? 'var(--cyan-300)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {burnRateText}
                       </td>
                       <td>
-                        <span className={`status-badge ${inv.trend === 'INCREASING' ? 'badge-danger' : inv.trend === 'DECREASING' ? 'badge-success' : inv.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
-                          {inv.trend || 'INSUFFICIENT DATA'}
+                        <span className={`status-badge ${trend === 'INCREASING' ? 'badge-danger' : trend === 'DECREASING' ? 'badge-success' : trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`} style={{ whiteSpace: 'nowrap' }}>
+                          {trend}
                         </span>
                       </td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', color: inv.days_to_minimum !== null && inv.days_to_minimum < 14 ? 'var(--hazard-red)' : 'var(--text-secondary)' }}>
-                        {inv.forecast_status || (inv.days_remaining ? `${inv.days_remaining} Days runway` : 'Forecast unavailable')}
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                        <div>{daysRunway !== null && daysRunway !== undefined ? `${daysRunway}d runway` : 'Runway unavailable'}</div>
+                        <div style={{ color: daysToMin !== null && daysToMin <= 7 ? 'var(--hazard-red)' : 'var(--text-muted)', fontSize: '10.5px', marginTop: '1px' }}>
+                          {daysToMin !== null && daysToMin !== undefined ? (daysToMin === 0 ? '0d to min (breached)' : `${daysToMin}d to min`) : ''}
+                        </div>
+                        {projectedBreach && (
+                          <div style={{ color: isBreached ? 'var(--hazard-red)' : 'var(--hazard-amber)', fontSize: '10px', fontWeight: '600', marginTop: '2px' }}>
+                            Breach: {projectedBreach}
+                          </div>
+                        )}
                       </td>
                       <td>
-                        <span className={`status-badge ${getLevelBadgeClass(inv.risk_level)}`}>
+                        <span className={`status-badge ${getLevelBadgeClass(inv.risk_level)}`} style={{ whiteSpace: 'nowrap' }}>
                           {inv.risk_level} ({inv.risk_score}%)
                         </span>
                       </td>
-                      <td onClick={e => e.stopPropagation()}>
-                        <button
-                          className="req-explain-btn"
-                          onClick={() => setSelectedExplainInv(inv)}
-                          title="View explainable contributing factors"
-                        >
-                          <Eye size={12} /> Explain
-                        </button>
+                      <td style={{ maxWidth: '220px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.35' }}>
+                          {whyFlaggedText}
+                        </div>
+                      </td>
+                      <td style={{ minWidth: '220px' }}>
+                        {deficit > 0 ? (
+                          topDonor ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: '700', color: '#fff', fontSize: '11.5px' }}>#{topDonor.rank} {topDonor.donor_station_name}</span>
+                                <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--cyan-300)' }}>{topDonor.distance_km?.toFixed(0)} km</span>
+                              </div>
+                              <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                                Stock: {topDonor.donor_current_stock} • <span style={{ color: 'var(--hazard-green)' }}>Surplus: +{topDonor.donor_transferable_surplus} {inv.unit}</span>
+                              </div>
+                              <div style={{ fontSize: '10px', color: '#a78bfa' }}>
+                                Rec Transfer: <strong>{topDonor.recommended_transfer_quantity} {inv.unit}</strong>
+                              </div>
+                              <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.2' }}>
+                                {topDonor.reason}
+                              </div>
+                              {canRequestTransfer && (
+                                <button
+                                  className="btn-primary"
+                                  onClick={(e) => { e.stopPropagation(); handleOpenTransfer(inv, si, topDonor); }}
+                                  style={{
+                                    marginTop: '4px',
+                                    padding: '3px 8px',
+                                    fontSize: '10.5px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    width: 'fit-content'
+                                  }}
+                                  title="Request supply transfer from this donor"
+                                >
+                                  <Truck size={11} /> Request Transfer
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                              No eligible donors (reserves &le; min)
+                            </span>
+                          )
+                        ) : (
+                          <span style={{ fontSize: '10.5px', color: 'var(--hazard-green)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCircle2 size={12} /> Safe Reserve
+                          </span>
+                        )}
+                      </td>
+                      <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <button
+                            className="req-explain-btn"
+                            onClick={() => setSelectedExplainInv(enrichedInv)}
+                            title="View explainable telemetry & donor breakdown"
+                          >
+                            <Eye size={12} /> Explain
+                          </button>
+                          {canRequestTransfer && deficit > 0 && (
+                            <button
+                              className="inv-action-btn"
+                              onClick={() => handleOpenTransfer(inv, si)}
+                              style={{ padding: '3px 8px', fontSize: '10.5px', color: 'var(--cyan-300)', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                              title="Initiate cross-station transfer request"
+                            >
+                              <Truck size={11} /> Transfer
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -910,23 +1161,38 @@ export default function SmartAutomationPage() {
         </div>
       )}
 
-      {/* ─── RESOURCE RISK EXPLAINABILITY MODAL (PASS 2) ─── */}
+      {/* ─── RESOURCE RISK EXPLAINABILITY MODAL (PASS 2 & 3) ─── */}
       {selectedExplainInv && (
         <QuickModal
           isOpen={true}
           onClose={() => setSelectedExplainInv(null)}
-          title={`Resource Risk Analysis — ${selectedExplainInv.item_name} (${selectedExplainInv.item_code})`}
+          title={`Resource Risk & Telemetry Analysis — ${selectedExplainInv.item_name} (${selectedExplainInv.item_code})`}
           footerButtons={
-            <button className="btn-secondary" onClick={() => setSelectedExplainInv(null)}>
-              Close Analysis
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {canRequestTransfer && ((selectedExplainInv.deficit || 0) > 0 || ((selectedExplainInv.current_stock ?? selectedExplainInv.quantity) <= selectedExplainInv.minimum_quantity)) && (
+                <button
+                  className="btn-primary"
+                  onClick={() => {
+                    const targetItem = selectedExplainInv;
+                    setSelectedExplainInv(null);
+                    handleOpenTransfer(targetItem, intelByCode[targetItem.item_code]);
+                  }}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <Truck size={13} /> Request Cross-Station Transfer
+                </button>
+              )}
+              <button className="btn-secondary" onClick={() => setSelectedExplainInv(null)}>
+                Close Analysis
+              </button>
+            </div>
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {/* Header Telemetry */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
               gap: '10px',
               background: 'rgba(15,23,42,0.6)',
               padding: '12px',
@@ -944,16 +1210,27 @@ export default function SmartAutomationPage() {
                 <div style={{
                   fontSize: '12.5px',
                   fontWeight: 700,
-                  color: selectedExplainInv.quantity <= selectedExplainInv.minimum_quantity ? 'var(--hazard-red)' : '#fff',
+                  color: (selectedExplainInv.current_stock ?? selectedExplainInv.quantity) <= selectedExplainInv.minimum_quantity ? 'var(--hazard-red)' : '#fff',
                   marginTop: '2px'
                 }}>
-                  {selectedExplainInv.quantity} {selectedExplainInv.unit}
+                  {selectedExplainInv.current_stock ?? selectedExplainInv.quantity} {selectedExplainInv.unit}
                 </div>
               </div>
               <div>
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>SAFETY MINIMUM</div>
                 <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--cyan-300)', marginTop: '2px' }}>
                   {selectedExplainInv.minimum_quantity} {selectedExplainInv.unit}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>DEFICIT / SURPLUS</div>
+                <div style={{
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  color: (selectedExplainInv.deficit || 0) > 0 ? 'var(--hazard-red)' : 'var(--hazard-green)',
+                  marginTop: '2px'
+                }}>
+                  {(selectedExplainInv.deficit || 0) > 0 ? `−${selectedExplainInv.deficit} ${selectedExplainInv.unit}` : `+${Math.max(0, (selectedExplainInv.current_stock ?? selectedExplainInv.quantity) - selectedExplainInv.minimum_quantity)} ${selectedExplainInv.unit}`}
                 </div>
               </div>
               <div>
@@ -964,10 +1241,10 @@ export default function SmartAutomationPage() {
               </div>
             </div>
 
-            {/* Burn Rate and Trend */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            {/* Burn Rate, Trend, and Projections */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
               <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>RECENT BURN RATE</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>7-DAY BURN RATE</div>
                 <div style={{ fontSize: '13px', fontWeight: 700, color: selectedExplainInv.burn_rate_text && !selectedExplainInv.burn_rate_text.includes('Insufficient') ? 'var(--cyan-300)' : 'var(--text-muted)' }}>
                   {selectedExplainInv.burn_rate_text || 'Insufficient consumption history'}
                 </div>
@@ -977,6 +1254,18 @@ export default function SmartAutomationPage() {
                 <span className={`status-badge ${selectedExplainInv.trend === 'INCREASING' ? 'badge-danger' : selectedExplainInv.trend === 'DECREASING' ? 'badge-success' : selectedExplainInv.trend === 'STABLE' ? 'badge-info' : 'badge-muted'}`}>
                   {selectedExplainInv.trend || 'INSUFFICIENT DATA'}
                 </span>
+              </div>
+              <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>RUNWAY / DAYS TO MIN</div>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: '#fff' }}>
+                  {selectedExplainInv.days_remaining !== null && selectedExplainInv.days_remaining !== undefined ? `${selectedExplainInv.days_remaining}d runway` : '—'} • {selectedExplainInv.days_to_minimum !== null && selectedExplainInv.days_to_minimum !== undefined ? (selectedExplainInv.days_to_minimum === 0 ? '0d to min (breached)' : `${selectedExplainInv.days_to_minimum}d to min`) : '—'}
+                </div>
+              </div>
+              <div style={{ padding: '12px', background: 'rgba(15,23,42,0.4)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>PROJECTED BREACH DATE</div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: selectedExplainInv.projected_breach_date?.includes('Breached') ? 'var(--hazard-red)' : 'var(--cyan-300)' }}>
+                  {selectedExplainInv.projected_breach_date || 'Projection unavailable'}
+                </div>
               </div>
             </div>
 
@@ -1007,6 +1296,80 @@ export default function SmartAutomationPage() {
               </ul>
             </div>
 
+            {/* ELIGIBLE DONOR STATIONS (PASS 3) */}
+            <div style={{ border: '1px solid rgba(139,92,246,0.3)', background: 'rgba(139,92,246,0.04)', borderRadius: 'var(--radius-md)', padding: '14px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 800, color: '#a78bfa', fontFamily: 'var(--font-mono)', letterSpacing: '0.8px', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Truck size={13} />
+                ELIGIBLE DONOR STATIONS & TRANSFER OPPORTUNITIES ({selectedExplainInv.donor_recommendations?.length || 0})
+              </div>
+
+              {selectedExplainInv.donor_recommendations && selectedExplainInv.donor_recommendations.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+                  {selectedExplainInv.donor_recommendations.map(d => (
+                    <div
+                      key={d.donor_station_id}
+                      style={{
+                        background: 'rgba(8, 13, 26, 0.7)',
+                        border: '1px solid rgba(139, 92, 246, 0.35)',
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 700, fontSize: '12.5px', color: '#fff' }}>
+                          #{d.rank} {d.donor_station_name}
+                        </span>
+                        <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--cyan-300)' }}>
+                          {d.distance_km?.toFixed(0)} km away
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <span>Current Stock: <strong style={{ color: '#fff' }}>{d.donor_current_stock} {d.unit}</strong></span>
+                        <span>Min Reserve: <strong>{d.donor_minimum_required} {d.unit}</strong></span>
+                        <span style={{ color: 'var(--hazard-green)' }}>Safe Surplus: <strong>+{d.donor_transferable_surplus} {d.unit}</strong></span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#c4b5fd', background: 'rgba(139,92,246,0.1)', padding: '4px 8px', borderRadius: '4px' }}>
+                        Recommended Transfer: <strong style={{ color: '#fff' }}>{d.recommended_transfer_quantity} {d.unit}</strong>
+                      </div>
+                      <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                        {d.reason}
+                      </div>
+                      {canRequestTransfer && (
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            const targetItem = selectedExplainInv;
+                            setSelectedExplainInv(null);
+                            handleOpenTransfer(targetItem, intelByCode[targetItem.item_code]);
+                          }}
+                          style={{
+                            marginTop: '6px',
+                            padding: '5px 10px',
+                            fontSize: '11px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <Truck size={12} /> Request Transfer ({d.recommended_transfer_quantity} {d.unit})
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', padding: '8px 0' }}>
+                  {(selectedExplainInv.deficit || 0) > 0
+                    ? 'No eligible donor stations found with surplus exceeding their minimum safety reserves.'
+                    : 'Station stock is currently above safety reserve threshold. No replenishment transfer required.'}
+                </div>
+              )}
+            </div>
+
             {/* Recommended Replenishment Action */}
             <div style={{ padding: '12px', background: 'rgba(56,189,248,0.05)', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(56,189,248,0.2)' }}>
               <div style={{ fontSize: '10px', color: 'var(--cyan-300)', fontFamily: 'var(--font-mono)', marginBottom: '4px' }}>
@@ -1018,10 +1381,25 @@ export default function SmartAutomationPage() {
             </div>
 
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px' }}>
-              • Deterministic calculation based on active database telemetry. No machine learning or artificial intelligence claims.
+              • Deterministic calculation based on active database telemetry and geospatial station coordinates.
             </div>
           </div>
         </QuickModal>
+      )}
+
+      {/* ─── REQUEST TRANSFER MODAL (PASS 3 REUSE) ─── */}
+      {transferModalTarget && (
+        <RequestTransferModal
+          destStation={transferModalTarget.destStation}
+          stations={stations}
+          itemInfo={transferModalTarget.itemInfo}
+          onClose={() => setTransferModalTarget(null)}
+          onRequested={() => {
+            setTransferModalTarget(null);
+            runLiveAnalysis(true);
+            setActionFeedback('Cross-station transfer request successfully submitted.');
+          }}
+        />
       )}
     </div>
   );

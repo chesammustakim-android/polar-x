@@ -8,6 +8,18 @@ from ..auth import get_current_user
 router = APIRouter(prefix="/api/inventory", tags=["Smart Inventory Management"])
 
 
+def require_director_or_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Requires EXPEDITION_DIRECTOR or ADMIN. Your role: {current_user.role}"
+        )
+    return current_user
+
+
+
+
 @router.get("/station-intelligence", response_model=List[schemas.StationIntelligenceItemOut])
 def get_station_inventory_intelligence(
     station_id: Optional[int] = Query(None, description="Filter by station ID (Director/Admin only)"),
@@ -111,6 +123,82 @@ def read_expedition_readiness(expedition_id: int, db: Session = Depends(get_db))
     if not readiness_list:
         raise HTTPException(status_code=404, detail=f"Expedition with ID {expedition_id} not found")
     return readiness_list[0]
+
+@router.get("/donors", response_model=List[schemas.DonorRecommendationOut])
+def get_donor_recommendations(
+    station_id: int = Query(..., description="Destination station ID needing supply"),
+    item_code: str = Query(..., description="Item code with shortage"),
+    deficit: Optional[float] = Query(None, description="How much is needed (units)"),
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Find donor stations that can safely supply an item_code to the destination station.
+    Only stations where (current_stock - minimum_required) > 0 are eligible.
+    Ranked by distance ASC, surplus DESC.
+    Accessible to STATION_HEAD (own station), EXPEDITION_DIRECTOR, ADMIN.
+    """
+    role = (current_user.role or "").upper()
+    if role == "STATION_HEAD":
+        if current_user.assigned_station_id != station_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Station Head can only query donor recommendations for their assigned station."
+            )
+    elif role not in ["ADMIN", "EXPEDITION_DIRECTOR"]:
+        raise HTTPException(status_code=403, detail="Insufficient privileges for donor recommendations.")
+
+    return crud.get_donor_recommendations(db, destination_station_id=station_id, item_code=item_code, deficit=deficit)
+
+
+@router.post("/station/{station_id}/consumption", response_model=schemas.DailyConsumptionRecordOut, status_code=status.HTTP_201_CREATED)
+def record_daily_consumption_from_inventory(
+    station_id: int,
+    data: schemas.DailyConsumptionRecordCreate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Convenience endpoint to record daily consumption from the Inventory page context.
+    STATION_HEAD: assigned station only. EXPEDITION_DIRECTOR/ADMIN: any station.
+    Updates inventory stock (STOCK_OUT) and records DailyConsumptionRecord.
+    """
+    role = (current_user.role or "").upper()
+    if role == "STATION_HEAD":
+        if current_user.assigned_station_id != station_id:
+            raise HTTPException(status_code=403, detail="Station Head restricted to assigned station.")
+    elif role not in ["ADMIN", "EXPEDITION_DIRECTOR"]:
+        raise HTTPException(status_code=403, detail="Insufficient privileges to record consumption.")
+
+    station = crud.get_station(db, station_id)
+    if not station:
+        raise HTTPException(status_code=404, detail=f"Station {station_id} not found.")
+
+    try:
+        db_rec = crud.create_daily_consumption(
+            db=db,
+            station_id=station_id,
+            data=data,
+            user_id=current_user.id,
+            username=current_user.full_name or current_user.username
+        )
+        return schemas.DailyConsumptionRecordOut(
+            id=db_rec.id,
+            station_id=db_rec.station_id,
+            station_name=station.name,
+            item_code=db_rec.item_code,
+            item_name=db_rec.item_name,
+            consumption_date=db_rec.consumption_date,
+            consumed_quantity=db_rec.consumed_quantity,
+            unit=db_rec.unit,
+            notes=db_rec.notes,
+            recorded_at=db_rec.recorded_at,
+            recorded_by_user_id=db_rec.recorded_by_user_id,
+            recorded_by=db_rec.recorded_by
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.get("/{item_id}", response_model=schemas.InventoryDetailOut)
 def read_inventory_detail(item_id: int, db: Session = Depends(get_db)):

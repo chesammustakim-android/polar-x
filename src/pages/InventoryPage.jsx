@@ -4,8 +4,10 @@ import {
   CheckCircle2, XCircle, Clock, ArrowRight, ArrowDownRight,
   ArrowUpRight, Edit3, Eye, History, ShieldAlert,
   Compass, MapPin, Layers, X, Loader, Check, Info, ShieldCheck,
-  TrendingDown, TrendingUp, AlertCircle, Building
+  TrendingDown, TrendingUp, AlertCircle, Building,
+  Truck, Send, ClipboardList, ChevronDown, ChevronUp, Navigation
 } from 'lucide-react';
+
 import { api } from '../services/api';
 import StatusBadge from '../components/common/StatusBadge';
 import QuickModal from '../components/common/QuickModal';
@@ -305,6 +307,523 @@ function AddInventoryModal({ expeditions = [], onClose, onCreated }) {
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ─── RECORD CONSUMPTION MODAL (PASS 3) ──────────────────────────────────────
+function RecordConsumptionModal({ stations = [], inventoryItems = [], onClose, onRecorded, defaultStationId = null }) {
+  const [stationId, setStationId] = useState(defaultStationId ? String(defaultStationId) : '');
+  const [itemCode, setItemCode] = useState('');
+  const [consumptionDate, setConsumptionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [consumedQty, setConsumedQty] = useState('');
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const selectedItem = inventoryItems.find(i => i.item_code === itemCode);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!stationId) { setError('Select a station.'); return; }
+    if (!itemCode) { setError('Select an item.'); return; }
+    const qty = parseFloat(consumedQty);
+    if (isNaN(qty) || qty <= 0) { setError('Consumed quantity must be greater than zero.'); return; }
+    setSaving(true);
+    try {
+      await api.recordStationConsumption(parseInt(stationId), {
+        item_code: itemCode,
+        item_name: selectedItem?.item_name || itemCode,
+        consumption_date: consumptionDate,
+        consumed_quantity: qty,
+        unit: selectedItem?.unit || 'Units',
+        notes: notes.trim() || null
+      });
+      onRecorded();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to record consumption.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="cargo-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="cargo-modal" style={{ maxWidth: '560px' }}>
+        <div className="cargo-modal-header">
+          <div className="cargo-modal-header-left">
+            <div className="cargo-modal-icon" style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)' }}>
+              <ClipboardList size={18} style={{ color: 'var(--hazard-green)' }} />
+            </div>
+            <div>
+              <h3>Record Daily Consumption</h3>
+              <p>Updates inventory stock (STOCK_OUT) and logs consumption history</p>
+            </div>
+          </div>
+          <button className="cargo-detail-close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="cargo-modal-body">
+            {error && (
+              <div style={{ background: 'var(--hazard-red-bg)', border: '1px solid var(--hazard-red-border)', color: 'var(--hazard-red)', padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: '12px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={14} /><span>{error}</span>
+              </div>
+            )}
+            <div className="cargo-modal-grid">
+              <div className="cargo-form-field cargo-modal-field-full">
+                <label className="cargo-form-label">Polar Facility *</label>
+                {defaultStationId ? (
+                  <div className="cargo-form-input" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(6,182,212,0.06)', color: 'var(--cyan-300)', cursor: 'not-allowed', opacity: 0.85 }}>
+                    <Building size={13} />
+                    {stations.find(s => s.id === defaultStationId)?.name || `Station #${defaultStationId}`}
+                  </div>
+                ) : (
+                  <select className="cargo-form-select" value={stationId} onChange={e => setStationId(e.target.value)} required>
+                    <option value="">Select station…</option>
+                    {stations.map(s => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+                  </select>
+                )}
+              </div>
+              <div className="cargo-form-field cargo-modal-field-full">
+                <label className="cargo-form-label">Resource / Item *</label>
+                <select className="cargo-form-select" value={itemCode} onChange={e => setItemCode(e.target.value)} required>
+                  <option value="">Select item code…</option>
+                  {inventoryItems.map(item => (
+                    <option key={item.id} value={item.item_code}>
+                      [{item.item_code}] {item.item_name} — {item.quantity} {item.unit} in stock
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selectedItem && (
+                <div className="cargo-form-field cargo-modal-field-full">
+                  <div style={{ display: 'flex', gap: 12, background: 'rgba(6,182,212,0.05)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                    <span>Current stock: <strong style={{ color: '#fff' }}>{selectedItem.quantity} {selectedItem.unit}</strong></span>
+                    <span>Min required: <strong style={{ color: 'var(--hazard-amber)' }}>{selectedItem.minimum_quantity} {selectedItem.unit}</strong></span>
+                    <span>Status: <strong style={{ color: selectedItem.status === 'NORMAL' ? 'var(--hazard-green)' : 'var(--hazard-red)' }}>{selectedItem.status}</strong></span>
+                  </div>
+                </div>
+              )}
+              <div className="cargo-form-field">
+                <label className="cargo-form-label">Consumption Date *</label>
+                <input className="cargo-form-input" type="date" value={consumptionDate} max={new Date().toISOString().split('T')[0]} onChange={e => setConsumptionDate(e.target.value)} required />
+              </div>
+              <div className="cargo-form-field">
+                <label className="cargo-form-label">Consumed Quantity * ({selectedItem?.unit || 'Units'})</label>
+                <input className="cargo-form-input" type="number" min="0.001" step="any" placeholder="e.g. 50" value={consumedQty} onChange={e => setConsumedQty(e.target.value)} required />
+              </div>
+              <div className="cargo-form-field cargo-modal-field-full">
+                <label className="cargo-form-label">Notes (optional)</label>
+                <input className="cargo-form-input" type="text" placeholder="e.g. Daily heating fuel — Block D winter ops" value={notes} onChange={e => setNotes(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div className="cargo-modal-footer">
+            <button type="button" className="btn-secondary" onClick={onClose}><X size={13} /> Cancel</button>
+            <button type="submit" className="btn-primary" style={{ background: 'var(--hazard-green)', borderColor: 'var(--hazard-green)' }} disabled={saving}>
+              {saving ? <Loader size={13} className="radar-sweep-icon" /> : <Check size={13} />}
+              {saving ? 'Recording…' : 'Record Consumption'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── REQUEST TRANSFER MODAL (PASS 3) ─────────────────────────────────────────
+export function RequestTransferModal({ destStation, stations = [], itemInfo, onClose, onRequested }) {
+  const [selectedDonorId, setSelectedDonorId] = useState('');
+  const [requestedQty, setRequestedQty] = useState('');
+  const [reason, setReason] = useState('');
+  const [donors, setDonors] = useState([]);
+  const [loadingDonors, setLoadingDonors] = useState(true)
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  const deficit = itemInfo?.surplus_deficit !== null ? Math.abs(itemInfo.surplus_deficit) : null;
+
+  useEffect(() => {
+    if (!destStation?.id || !itemInfo?.item_code) return;
+    setLoadingDonors(true);
+    api.getDonorRecommendations(destStation.id, itemInfo.item_code, deficit)
+      .then(d => {
+        setDonors(d || []);
+        if (d && d.length > 0) {
+          setSelectedDonorId(String(d[0].donor_station_id));
+          setRequestedQty(String(d[0].recommended_transfer_quantity));
+        }
+      })
+      .catch(() => setDonors([]))
+      .finally(() => setLoadingDonors(false));
+  }, [destStation?.id, itemInfo?.item_code]);
+
+  const selectedDonor = donors.find(d => String(d.donor_station_id) === selectedDonorId);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!selectedDonorId) { setError('Select a donor station.'); return; }
+    const qty = parseFloat(requestedQty);
+    if (isNaN(qty) || qty <= 0) { setError('Requested quantity must be greater than zero.'); return; }
+    if (selectedDonor && qty > selectedDonor.donor_transferable_surplus) {
+      setError(`Cannot exceed donor surplus of ${selectedDonor.donor_transferable_surplus} ${selectedDonor.unit}.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createTransferRequest(destStation.id, {
+        source_station_id: parseInt(selectedDonorId),
+        item_code: itemInfo.item_code,
+        item_name: itemInfo.item_name,
+        requested_quantity: qty,
+        request_reason: reason.trim() || `Shortage at ${destStation.name}: deficit ${deficit} ${itemInfo.unit}`
+      });
+      onRequested();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Failed to create transfer request.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="cargo-modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="cargo-modal" style={{ maxWidth: '620px' }}>
+        <div className="cargo-modal-header">
+          <div className="cargo-modal-header-left">
+            <div className="cargo-modal-icon" style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)' }}>
+              <Truck size={18} style={{ color: '#a78bfa' }} />
+            </div>
+            <div>
+              <h3>Request Cross-Station Transfer</h3>
+              <p>{itemInfo?.item_name} ({itemInfo?.item_code}) → {destStation?.name}</p>
+            </div>
+          </div>
+          <button className="cargo-detail-close" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="cargo-modal-body">
+            {/* Shortage summary */}
+            <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-sm)', marginBottom: 14, fontSize: 11.5, fontFamily: 'var(--font-mono)', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+              <span>Destination: <strong style={{ color: '#fff' }}>{destStation?.name}</strong></span>
+              <span>Current stock: <strong style={{ color: 'var(--hazard-red)' }}>{itemInfo?.current_stock} {itemInfo?.unit}</strong></span>
+              <span>Min required: <strong style={{ color: 'var(--hazard-amber)' }}>{itemInfo?.minimum_quantity} {itemInfo?.unit}</strong></span>
+              {deficit !== null && <span>Deficit: <strong style={{ color: 'var(--hazard-red)' }}>−{deficit} {itemInfo?.unit}</strong></span>}
+            </div>
+
+            {error && (
+              <div style={{ background: 'var(--hazard-red-bg)', border: '1px solid var(--hazard-red-border)', color: 'var(--hazard-red)', padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: '12px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertCircle size={14} /><span>{error}</span>
+              </div>
+            )}
+
+            {loadingDonors ? (
+              <div className="cargo-loading" style={{ minHeight: '80px' }}>
+                <Loader size={16} className="radar-sweep-icon" />
+                <span>Scanning eligible donor stations…</span>
+              </div>
+            ) : donors.length === 0 ? (
+              <div className="cargo-empty-state" style={{ minHeight: '80px' }}>
+                <Navigation size={18} style={{ margin: '0 auto 6px', color: 'var(--text-muted)' }} />
+                <p style={{ fontSize: 12 }}>No eligible donor stations found.</p>
+                <p style={{ fontSize: 11 }}>All other stations are at or below their minimum reserves for this resource.</p>
+              </div>
+            ) : (
+              <div className="cargo-modal-grid">
+                {/* Donor list */}
+                <div className="cargo-form-field cargo-modal-field-full">
+                  <label className="cargo-form-label">Select Donor Station * ({donors.length} eligible)</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {donors.map(d => (
+                      <label
+                        key={d.donor_station_id}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: '10px',
+                          padding: '10px 12px', border: `1px solid ${selectedDonorId === String(d.donor_station_id) ? 'rgba(139,92,246,0.5)' : 'var(--border-subtle)'}`,
+                          borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                          background: selectedDonorId === String(d.donor_station_id) ? 'rgba(139,92,246,0.06)' : 'rgba(15,23,42,0.4)'
+                        }}
+                      >
+                        <input
+                          type="radio" name="donor" value={String(d.donor_station_id)}
+                          checked={selectedDonorId === String(d.donor_station_id)}
+                          onChange={() => { setSelectedDonorId(String(d.donor_station_id)); setRequestedQty(String(d.recommended_transfer_quantity)); }}
+                          style={{ marginTop: 2 }}
+                        />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, color: '#fff', fontSize: 12 }}>#{d.rank} {d.donor_station_name}</span>
+                            <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--cyan-300)' }}>{d.distance_km?.toFixed(0)} km away</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 10.5, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                            <span>Stock: {d.donor_current_stock} {d.unit}</span>
+                            <span>Reserve: {d.donor_minimum_required} {d.unit}</span>
+                            <span style={{ color: 'var(--hazard-green)' }}>Surplus: +{d.donor_transferable_surplus} {d.unit}</span>
+                            <span style={{ color: '#a78bfa' }}>Recommended: {d.recommended_transfer_quantity} {d.unit}</span>
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="cargo-form-field">
+                  <label className="cargo-form-label">Requested Quantity * ({itemInfo?.unit})</label>
+                  <input
+                    className="cargo-form-input" type="number" min="0.001" step="any"
+                    value={requestedQty} onChange={e => setRequestedQty(e.target.value)} required
+                    max={selectedDonor?.donor_transferable_surplus || undefined}
+                  />
+                  {selectedDonor && (
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', marginTop: 2, display: 'block' }}>
+                      Max transferable: {selectedDonor.donor_transferable_surplus} {selectedDonor.unit}
+                    </span>
+                  )}
+                </div>
+
+                <div className="cargo-form-field">
+                  <label className="cargo-form-label">Request Reason</label>
+                  <input
+                    className="cargo-form-input" type="text"
+                    placeholder="e.g. Critical heating fuel shortage — winter storm ops"
+                    value={reason} onChange={e => setReason(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="cargo-modal-footer">
+            <button type="button" className="btn-secondary" onClick={onClose}><X size={13} /> Cancel</button>
+            {donors.length > 0 && (
+              <button type="submit" className="btn-primary" style={{ background: 'rgba(139,92,246,0.85)', borderColor: '#7c3aed' }} disabled={saving || !selectedDonorId}>
+                {saving ? <Loader size={13} className="radar-sweep-icon" /> : <Send size={13} />}
+                {saving ? 'Submitting…' : 'Submit Transfer Request'}
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── TRANSFER MANAGEMENT PANEL (PASS 3) ──────────────────────────────────────
+function TransferManagementPanel({ transfers = [], loading, isDirectorOrAdmin, onRefresh, onAction }) {
+  const [expanded, setExpanded] = useState(null);
+
+  const STATUS_COLORS = {
+    REQUESTED: { color: 'var(--cyan-300)', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
+    APPROVED: { color: 'var(--hazard-green)', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.2)' },
+    REJECTED: { color: 'var(--hazard-red)', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.2)' },
+    COMPLETED: { color: '#9ca3af', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.2)' },
+    CANCELLED: { color: '#6b7280', bg: 'rgba(75,85,99,0.06)', border: 'rgba(75,85,99,0.15)' },
+  };
+
+  const [approveId, setApproveId] = useState(null);
+  const [approveQty, setApproveQty] = useState('');
+  const [approveNotes, setApproveNotes] = useState('');
+  const [rejectId, setRejectId] = useState(null);
+  const [rejectNotes, setRejectNotes] = useState('');
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState(null);
+
+  const doApprove = async (tr) => {
+    setActionBusy(true); setActionError(null);
+    try {
+      await api.approveTransfer(tr.id, { action: 'APPROVED', approved_quantity: parseFloat(approveQty) || tr.requested_quantity, approver_notes: approveNotes.trim() || null });
+      setApproveId(null); setApproveQty(''); setApproveNotes('');
+      onRefresh();
+    } catch (e) { setActionError(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const doReject = async (tr) => {
+    setActionBusy(true); setActionError(null);
+    try {
+      await api.rejectTransfer(tr.id, { action: 'REJECTED', approver_notes: rejectNotes.trim() || 'Rejected.' });
+      setRejectId(null); setRejectNotes('');
+      onRefresh();
+    } catch (e) { setActionError(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const doComplete = async (id) => {
+    setActionBusy(true); setActionError(null);
+    try {
+      await api.completeTransfer(id, { completion_notes: 'Transfer completed.' });
+      onRefresh();
+    } catch (e) { setActionError(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const doCancel = async (id) => {
+    setActionBusy(true); setActionError(null);
+    try {
+      await api.cancelTransfer(id);
+      onRefresh();
+    } catch (e) { setActionError(e.message); }
+    finally { setActionBusy(false); }
+  };
+
+  const pending = transfers.filter(t => ['REQUESTED', 'APPROVED'].includes(t.status));
+  const history = transfers.filter(t => ['COMPLETED', 'REJECTED', 'CANCELLED'].includes(t.status));
+
+  return (
+    <div className="station-requirements-view">
+      <div className="station-context-banner" style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Truck size={15} style={{ color: '#a78bfa' }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Cross-Station Transfer Requests</span>
+          {pending.length > 0 && (
+            <span style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--hazard-red)', fontSize: 10, fontFamily: 'var(--font-mono)', padding: '1px 7px', borderRadius: 12 }}>
+              {pending.length} PENDING
+            </span>
+          )}
+        </div>
+        <button className="btn-secondary" onClick={onRefresh} style={{ padding: '6px 12px', fontSize: 11 }}>
+          <RefreshCw size={13} className={loading ? 'radar-sweep-icon' : ''} /> Refresh
+        </button>
+      </div>
+
+      {actionError && (
+        <div style={{ background: 'var(--hazard-red-bg)', border: '1px solid var(--hazard-red-border)', color: 'var(--hazard-red)', padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: '12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={13} /><span>{actionError}</span>
+          <button style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }} onClick={() => setActionError(null)}><X size={12} /></button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="cargo-loading"><Loader size={18} className="radar-sweep-icon" /> Loading transfer requests…</div>
+      ) : transfers.length === 0 ? (
+        <div className="cargo-empty-state">
+          <Truck size={22} style={{ margin: '0 auto 8px', color: 'var(--text-muted)' }} />
+          <p>No transfer requests found.</p>
+          <p style={{ fontSize: 11, marginTop: 4 }}>Use the Station Requirements view to request a cross-station transfer for shortage items.</p>
+        </div>
+      ) : (
+        <div>
+          {pending.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Pending / Active ({pending.length})</div>
+              {pending.map(tr => {
+                const sc = STATUS_COLORS[tr.status] || STATUS_COLORS.REQUESTED;
+                const isExpanded = expanded === tr.id;
+                return (
+                  <div key={tr.id} style={{ border: `1px solid ${sc.border}`, borderRadius: 'var(--radius-md)', background: sc.bg, marginBottom: 10, overflow: 'hidden' }}>
+                    <div
+                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer' }}
+                      onClick={() => setExpanded(isExpanded ? null : tr.id)}
+                    >
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>{tr.status}</span>
+                        <span style={{ fontWeight: 600, fontSize: 12, color: '#fff' }}>#{tr.id} — {tr.item_name || tr.item_code}</span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+                          {tr.source_station_name} → {tr.destination_station_name}
+                        </span>
+                        <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--cyan-300)' }}>
+                          {tr.requested_quantity} {tr.unit}
+                        </span>
+                        {tr.distance_km && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{tr.distance_km} km</span>}
+                      </div>
+                      {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </div>
+
+                    {isExpanded && (
+                      <div style={{ borderTop: `1px solid ${sc.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+                          <div><div style={{ color: 'var(--text-muted)' }}>ITEM CODE</div><div style={{ color: '#fff', fontWeight: 600 }}>{tr.item_code}</div></div>
+                          <div><div style={{ color: 'var(--text-muted)' }}>REQUESTED QTY</div><div style={{ color: 'var(--cyan-300)', fontWeight: 700 }}>{tr.requested_quantity} {tr.unit}</div></div>
+                          {tr.approved_quantity && <div><div style={{ color: 'var(--text-muted)' }}>APPROVED QTY</div><div style={{ color: 'var(--hazard-green)', fontWeight: 700 }}>{tr.approved_quantity} {tr.unit}</div></div>}
+                          <div><div style={{ color: 'var(--text-muted)' }}>REQUESTED BY</div><div>{tr.requester_name}</div></div>
+                          {tr.approver_name && <div><div style={{ color: 'var(--text-muted)' }}>REVIEWED BY</div><div>{tr.approver_name}</div></div>}
+                          <div><div style={{ color: 'var(--text-muted)' }}>REQUESTED AT</div><div>{tr.requested_at?.split('T')[0]}</div></div>
+                        </div>
+                        {tr.request_reason && <div style={{ fontSize: 11, color: 'var(--text-secondary)', fontStyle: 'italic' }}>Reason: {tr.request_reason}</div>}
+                        {tr.approver_notes && <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Director note: {tr.approver_notes}</div>}
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', paddingTop: 4, borderTop: '1px solid var(--border-subtle)' }}>
+                          {isDirectorOrAdmin && tr.status === 'REQUESTED' && (
+                            <>
+                              {approveId === tr.id ? (
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <input className="cargo-form-input" type="number" min="0.001" step="any" style={{ width: 100 }}
+                                    placeholder={`Qty (${tr.unit})`} value={approveQty} onChange={e => setApproveQty(e.target.value)} />
+                                  <input className="cargo-form-input" type="text" style={{ flex: 1, minWidth: 120 }}
+                                    placeholder="Approval notes (optional)" value={approveNotes} onChange={e => setApproveNotes(e.target.value)} />
+                                  <button className="btn-primary" style={{ fontSize: 11, padding: '5px 10px', background: 'var(--hazard-green)', borderColor: 'var(--hazard-green)' }}
+                                    onClick={() => doApprove(tr)} disabled={actionBusy}>
+                                    <Check size={12} /> Confirm Approve
+                                  </button>
+                                  <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 10px' }} onClick={() => setApproveId(null)}><X size={12} /></button>
+                                </div>
+                              ) : (
+                                <button className="btn-primary" style={{ fontSize: 11, padding: '5px 12px', background: 'var(--hazard-green)', borderColor: 'var(--hazard-green)' }}
+                                  onClick={() => { setApproveId(tr.id); setApproveQty(String(tr.requested_quantity)); setRejectId(null); }}>
+                                  <Check size={12} /> Approve
+                                </button>
+                              )}
+                              {rejectId === tr.id ? (
+                                <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <input className="cargo-form-input" type="text" style={{ flex: 1, minWidth: 140 }}
+                                    placeholder="Rejection reason…" value={rejectNotes} onChange={e => setRejectNotes(e.target.value)} />
+                                  <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 10px', color: 'var(--hazard-red)', borderColor: 'rgba(239,68,68,0.4)' }}
+                                    onClick={() => doReject(tr)} disabled={actionBusy}>
+                                    <X size={12} /> Confirm Reject
+                                  </button>
+                                  <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 10px' }} onClick={() => setRejectId(null)}><X size={12} /></button>
+                                </div>
+                              ) : (
+                                <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px', color: 'var(--hazard-red)', borderColor: 'rgba(239,68,68,0.3)' }}
+                                  onClick={() => { setRejectId(tr.id); setApproveId(null); }}>
+                                  <X size={12} /> Reject
+                                </button>
+                              )}
+                            </>
+                          )}
+                          {isDirectorOrAdmin && tr.status === 'APPROVED' && (
+                            <button className="btn-primary" style={{ fontSize: 11, padding: '5px 12px', background: 'rgba(139,92,246,0.85)', borderColor: '#7c3aed' }}
+                              onClick={() => doComplete(tr.id)} disabled={actionBusy}>
+                              {actionBusy ? <Loader size={12} className="radar-sweep-icon" /> : <Truck size={12} />}
+                              Complete Transfer
+                            </button>
+                          )}
+                          <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px', color: 'var(--text-muted)' }}
+                            onClick={() => doCancel(tr.id)} disabled={actionBusy}>
+                            <X size={12} /> Cancel Request
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>History ({history.length})</div>
+              {history.map(tr => {
+                const sc = STATUS_COLORS[tr.status] || STATUS_COLORS.CANCELLED;
+                return (
+                  <div key={tr.id} style={{ border: `1px solid ${sc.border}`, borderRadius: 'var(--radius-sm)', background: 'rgba(15,23,42,0.3)', marginBottom: 6, padding: '10px 14px', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', background: sc.bg, border: `1px solid ${sc.border}`, color: sc.color, padding: '1px 6px', borderRadius: 8, fontWeight: 700 }}>{tr.status}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>#{tr.id} {tr.item_name || tr.item_code}</span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{tr.source_station_name} → {tr.destination_station_name}</span>
+                    <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)' }}>{tr.transferred_quantity || tr.approved_quantity || tr.requested_quantity} {tr.unit}</span>
+                    {tr.completed_at && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{tr.completed_at?.split('T')[0]}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -937,7 +1456,7 @@ function StationResourceExplainModal({ item, onClose }) {
   );
 }
 
-// ─── STATION RESOURCE REQUIREMENTS VIEW (PASS 2) ────────────────────────────
+// ─── STATION RESOURCE REQUIREMENTS VIEW (PASS 2 + PASS 3) ──────────────────
 function StationRequirementsView({
   intelList = [],
   loading = false,
@@ -945,9 +1464,11 @@ function StationRequirementsView({
   selectedStationId = '',
   onStationChange,
   isStationHead = false,
+  isDirectorOrAdmin = false,
   userStationName = '',
   onRefresh,
-  onOpenExplain
+  onOpenExplain,
+  onRequestTransfer
 }) {
   const urgentCount = intelList.filter(i => i.risk_level === 'URGENT').length;
   const criticalCount = intelList.filter(i => i.risk_level === 'CRITICAL').length;
@@ -1127,13 +1648,25 @@ function StationRequirementsView({
                         </span>
                       </td>
                       <td onClick={e => e.stopPropagation()}>
-                        <button
-                          className="req-explain-btn"
-                          onClick={() => onOpenExplain(req)}
-                          title="View contributing factors and explainability analysis"
-                        >
-                          <Eye size={12} /> Explain
-                        </button>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <button
+                            className="req-explain-btn"
+                            onClick={() => onOpenExplain(req)}
+                            title="View contributing factors and explainability analysis"
+                          >
+                            <Eye size={12} /> Explain
+                          </button>
+                          {isDeficit && onRequestTransfer && (
+                            <button
+                              className="req-explain-btn"
+                              style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa' }}
+                              onClick={(e) => { e.stopPropagation(); onRequestTransfer(req, stations.find(s => s.id === req.station_id)); }}
+                              title="Request cross-station transfer to cover this shortage"
+                            >
+                              <Truck size={12} /> Transfer
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1154,7 +1687,7 @@ export default function InventoryPage({ currentUser }) {
   const isStationHead = userRole === 'STATION_HEAD';
   const isDirectorOrAdmin = userRole === 'ADMIN' || userRole === 'EXPEDITION_DIRECTOR';
 
-  const [viewMode, setViewMode] = useState('catalog'); // 'catalog' | 'station-requirements' | 'readiness'
+  const [viewMode, setViewMode] = useState('catalog'); // 'catalog' | 'station-requirements' | 'readiness' | 'transfers'
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
   const [expeditions, setExpeditions] = useState([]);
@@ -1169,6 +1702,12 @@ export default function InventoryPage({ currentUser }) {
   const [stations, setStations] = useState([]);
   const [selectedStationFilter, setSelectedStationFilter] = useState('');
   const [explainModalItem, setExplainModalItem] = useState(null);
+  
+  // Pass 3: Transfer + Consumption state
+  const [showConsumptionModal, setShowConsumptionModal] = useState(false);
+  const [transferModalItem, setTransferModalItem] = useState(null); // { req, station }
+  const [transfers, setTransfers] = useState([]);
+  const [transfersLoading, setTransfersLoading] = useState(false);
 
   // Filter States
   const [search, setSearch] = useState('');
@@ -1261,8 +1800,23 @@ export default function InventoryPage({ currentUser }) {
       loadReadiness();
     } else if (viewMode === 'station-requirements') {
       loadStationIntel();
+    } else if (viewMode === 'transfers') {
+      loadTransfers();
     }
   }, [viewMode, loadReadiness, loadStationIntel]);
+
+  // Pass 3: load transfers
+  const loadTransfers = useCallback(async () => {
+    setTransfersLoading(true);
+    try {
+      const data = await api.getTransfers();
+      setTransfers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.warn('[InventoryPage] Transfers load error:', err);
+    } finally {
+      setTransfersLoading(false);
+    }
+  }, []);
 
   // Quick stat card click filter
   const handleStatFilter = (statusVal) => {
@@ -1315,6 +1869,16 @@ export default function InventoryPage({ currentUser }) {
           >
             <RefreshCw size={14} className={loading || readinessLoading ? 'radar-sweep-icon' : ''} />
             Sync Stock
+          </button>
+          {/* Pass 3: Record Consumption button */}
+          <button
+            className="btn-secondary"
+            onClick={() => setShowConsumptionModal(true)}
+            title="Record daily resource consumption (updates inventory stock)"
+            style={{ padding: '8px 12px', color: 'var(--hazard-green)', borderColor: 'rgba(16,185,129,0.3)' }}
+          >
+            <ClipboardList size={14} />
+            Record Consumption
           </button>
           <button className="btn-primary" onClick={() => setShowAddModal(true)}>
             <Plus size={14} />
@@ -1557,7 +2121,7 @@ export default function InventoryPage({ currentUser }) {
         </>
       )}
 
-      {/* ─── VIEW 2: STATION REQUIREMENTS & INTELLIGENCE (PASS 2) ─── */}
+      {/* ─── VIEW 2: STATION REQUIREMENTS & INTELLIGENCE (PASS 2 + 3) ─── */}
       {viewMode === 'station-requirements' && (
         <StationRequirementsView
           intelList={stationIntel}
@@ -1566,9 +2130,11 @@ export default function InventoryPage({ currentUser }) {
           selectedStationId={selectedStationFilter}
           onStationChange={setSelectedStationFilter}
           isStationHead={isStationHead}
+          isDirectorOrAdmin={isDirectorOrAdmin}
           userStationName={user.assigned_station_name || (stations.find(s => s.id === user.assigned_station_id)?.name) || 'Maitri Station'}
           onRefresh={loadStationIntel}
           onOpenExplain={(item) => setExplainModalItem(item)}
+          onRequestTransfer={(req, station) => setTransferModalItem({ req, station })}
         />
       )}
 
@@ -1578,6 +2144,16 @@ export default function InventoryPage({ currentUser }) {
           readinessList={readinessList}
           loading={readinessLoading}
           onRefresh={loadReadiness}
+        />
+      )}
+
+      {/* ─── VIEW 4: CROSS-STATION TRANSFERS (PASS 3) ─── */}
+      {viewMode === 'transfers' && (
+        <TransferManagementPanel
+          transfers={transfers}
+          loading={transfersLoading}
+          isDirectorOrAdmin={isDirectorOrAdmin}
+          onRefresh={loadTransfers}
         />
       )}
 
@@ -1617,6 +2193,28 @@ export default function InventoryPage({ currentUser }) {
         <StationResourceExplainModal
           item={explainModalItem}
           onClose={() => setExplainModalItem(null)}
+        />
+      )}
+
+      {/* ─── RECORD CONSUMPTION MODAL (PASS 3) ─── */}
+      {showConsumptionModal && (
+        <RecordConsumptionModal
+          stations={stations}
+          inventoryItems={items}
+          defaultStationId={isStationHead ? (user.assigned_station_id || null) : null}
+          onClose={() => setShowConsumptionModal(false)}
+          onRecorded={() => { loadInventory(); loadStationIntel(); }}
+        />
+      )}
+
+      {/* ─── REQUEST TRANSFER MODAL (PASS 3) ─── */}
+      {transferModalItem && (
+        <RequestTransferModal
+          destStation={transferModalItem.station || stations.find(s => s.id === transferModalItem.req?.station_id)}
+          stations={stations}
+          itemInfo={transferModalItem.req}
+          onClose={() => setTransferModalItem(null)}
+          onRequested={() => { loadTransfers(); setTransferModalItem(null); if (viewMode !== 'transfers') setViewMode('transfers'); }}
         />
       )}
     </div>

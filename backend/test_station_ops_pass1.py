@@ -270,6 +270,9 @@ def run_tests():
 
     return failed == 0
 
+def test_station_ops_pass1_suite():
+    assert run_tests() is True
+
 if __name__ == "__main__":
     success = run_tests()
     sys.exit(0 if success else 1)

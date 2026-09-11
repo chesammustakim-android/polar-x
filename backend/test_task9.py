@@ -160,10 +160,11 @@ def test_get_current_user_profile():
 
 def test_demo_users_endpoint():
     demos = auth.get_demo_users()
-    assert len(demos) == 6, f"Expected 6 demo users, got {len(demos)}"
+    assert len(demos) == 7, f"Expected 7 demo users, got {len(demos)}"
     roles = [d.role for d in demos]
     assert "ADMIN" in roles
     assert "EXPEDITION_DIRECTOR" in roles
+    assert "STATION_HEAD" in roles
     assert "LOGISTICS_OFFICER" in roles
     assert "EXPEDITION_LEADER" in roles
     assert "SAR_OFFICER" in roles

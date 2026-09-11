@@ -354,6 +354,61 @@ class DailyConsumptionRecord(Base):
     user = relationship("User", foreign_keys=[recorded_by_user_id])
 
 
+class StationTransferRequest(Base):
+    """
+    Cross-station resource transfer lifecycle:
+    REQUESTED → APPROVED / REJECTED → COMPLETED
+    and CANCELLED at any pre-completion point.
+
+    Approval alone does NOT change inventory.
+    Stock changes only when status becomes COMPLETED (atomic).
+    """
+    __tablename__ = "station_transfer_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Stations
+    source_station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+    destination_station_id = Column(Integer, ForeignKey("stations.id"), nullable=False, index=True)
+
+    # Resource
+    item_code = Column(String, nullable=False, index=True)
+    item_name = Column(String, nullable=True)
+    unit = Column(String, nullable=True, default="Units")
+
+    # Quantities
+    requested_quantity = Column(Float, nullable=False)
+    approved_quantity = Column(Float, nullable=True)      # Set at approval
+    transferred_quantity = Column(Float, nullable=True)   # Set at completion
+
+    # Metadata
+    request_reason = Column(String, nullable=True)
+    approver_notes = Column(String, nullable=True)
+    completion_notes = Column(String, nullable=True)
+    distance_km = Column(Float, nullable=True)            # Haversine at creation
+
+    # People
+    requester_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approver_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    requester_name = Column(String, nullable=False, default="Station Officer")
+    approver_name = Column(String, nullable=True)
+
+    # Status lifecycle
+    status = Column(String, nullable=False, default="REQUESTED", index=True)
+    # REQUESTED | APPROVED | REJECTED | COMPLETED | CANCELLED
+
+    # Timestamps
+    requested_at = Column(String, nullable=False)
+    reviewed_at = Column(String, nullable=True)
+    completed_at = Column(String, nullable=True)
+
+    # Relationships
+    source_station = relationship("Station", foreign_keys=[source_station_id])
+    destination_station = relationship("Station", foreign_keys=[destination_station_id])
+    requester = relationship("User", foreign_keys=[requester_user_id])
+    approver = relationship("User", foreign_keys=[approver_user_id])
+
+
 class SystemSetting(Base):
     """
     Persistent system-wide configuration key/value store.

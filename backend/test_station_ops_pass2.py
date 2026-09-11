@@ -56,11 +56,10 @@ def override_get_db():
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
-
 client = TestClient(app)
 
 def setup_module():
+    app.dependency_overrides[get_db] = override_get_db
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
@@ -224,6 +223,9 @@ def setup_module():
         db.commit()
     finally:
         db.close()
+
+def teardown_module():
+    app.dependency_overrides.clear()
 
 
 def get_token(username, password):

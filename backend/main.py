@@ -11,7 +11,7 @@ from . import models, crud, schemas
 from .routers import (
     expeditions, cargo, inventory, personnel, alerts, stations,
     incidents, response_units, reports, auth, automation,
-    settings as settings_router
+    settings as settings_router, transfers
 )
 
 # ─── Environment Configuration ───────────────────────────────────────────────
@@ -68,6 +68,8 @@ app.include_router(response_units.router)
 app.include_router(reports.router)
 app.include_router(automation.router)
 app.include_router(settings_router.router)
+app.include_router(transfers.router)
+
 
 
 @app.get("/api", tags=["System"])

@@ -510,9 +510,71 @@ class StationIntelligenceItemOut(BaseModel):
     why_flagged: List[str] = []
     consumption_record_count: int
     has_sufficient_history: bool
+    # Pass 3: donor recommendations (populated only for shortage items)
+    donor_recommendations: List["DonorRecommendationOut"] = []
 
 
-# --- RESPONSE UNIT SCHEMAS ---
+# --- DONOR RECOMMENDATION SCHEMA (PASS 3) ---
+class DonorRecommendationOut(BaseModel):
+    """A candidate donor station for a cross-station resource transfer."""
+    donor_station_id: int
+    donor_station_name: str
+    distance_km: float
+    donor_current_stock: float
+    donor_minimum_required: float
+    donor_transferable_surplus: float  # stock - minimum (always > 0 for eligible donors)
+    recommended_transfer_quantity: float  # min(deficit, surplus)
+    unit: str
+    rank: int  # 1 = best
+
+
+# --- TRANSFER REQUEST SCHEMAS (PASS 3) ---
+class StationTransferRequestCreate(BaseModel):
+    """Submitted by Station Head (own station) or Director (any station)."""
+    source_station_id: int
+    item_code: str
+    item_name: Optional[str] = None
+    requested_quantity: float
+    request_reason: Optional[str] = None
+
+class StationTransferRequestReview(BaseModel):
+    """Director approves or rejects. approved_quantity required for APPROVED."""
+    action: str  # APPROVED | REJECTED
+    approved_quantity: Optional[float] = None
+    approver_notes: Optional[str] = None
+
+class StationTransferRequestComplete(BaseModel):
+    """Director completes an approved transfer. Triggers atomic stock update."""
+    completion_notes: Optional[str] = None
+
+class StationTransferRequestOut(BaseModel):
+    """Full transfer record for UI display."""
+    id: int
+    source_station_id: int
+    source_station_name: str
+    destination_station_id: int
+    destination_station_name: str
+    item_code: str
+    item_name: Optional[str] = None
+    unit: Optional[str] = None
+    requested_quantity: float
+    approved_quantity: Optional[float] = None
+    transferred_quantity: Optional[float] = None
+    request_reason: Optional[str] = None
+    approver_notes: Optional[str] = None
+    completion_notes: Optional[str] = None
+    distance_km: Optional[float] = None
+    requester_user_id: Optional[int] = None
+    approver_user_id: Optional[int] = None
+    requester_name: str
+    approver_name: Optional[str] = None
+    status: str
+    requested_at: str
+    reviewed_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ResponseUnitBase(BaseModel):
     unit_code: str
     name: str

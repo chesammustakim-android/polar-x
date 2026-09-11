@@ -1030,8 +1030,107 @@ export const api = {
       console.warn('[POLAR-X API] Failed to fetch defaults:', err.message);
       throw err;
     }
+  },
+
+  // ─── Pass 3: Cross-Station Transfer Requests ─────────────────────────────
+
+  async getTransfers(filters = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (filters.status && filters.status !== 'ALL') params.append('status', filters.status);
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await authFetch(`${BASE_URL}/api/transfers${qs}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn('[POLAR-X API] Failed to fetch transfers:', err.message);
+      return [];
+    }
+  },
+
+  async createTransferRequest(destinationStationId, data) {
+    const res = await authFetch(
+      `${BASE_URL}/api/transfers?destination_station_id=${destinationStationId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      }
+    );
+    return await handleResponse(res);
+  },
+
+  async getTransferById(id) {
+    try {
+      const res = await authFetch(`${BASE_URL}/api/transfers/${id}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn(`[POLAR-X API] Failed to fetch transfer #${id}:`, err.message);
+      return null;
+    }
+  },
+
+  async approveTransfer(id, data = {}) {
+    const res = await authFetch(`${BASE_URL}/api/transfers/${id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await handleResponse(res);
+  },
+
+  async rejectTransfer(id, data = {}) {
+    const res = await authFetch(`${BASE_URL}/api/transfers/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await handleResponse(res);
+  },
+
+  async completeTransfer(id, data = {}) {
+    const res = await authFetch(`${BASE_URL}/api/transfers/${id}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await handleResponse(res);
+  },
+
+  async cancelTransfer(id) {
+    const res = await authFetch(`${BASE_URL}/api/transfers/${id}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    return await handleResponse(res);
+  },
+
+  // ─── Pass 3: Donor Recommendations ──────────────────────────────────────
+
+  async getDonorRecommendations(stationId, itemCode, deficit = null) {
+    try {
+      const params = new URLSearchParams({ station_id: stationId, item_code: itemCode });
+      if (deficit !== null) params.append('deficit', deficit);
+      const res = await authFetch(`${BASE_URL}/api/inventory/donors?${params.toString()}`);
+      return await handleResponse(res);
+    } catch (err) {
+      console.warn('[POLAR-X API] Failed to fetch donor recommendations:', err.message);
+      return [];
+    }
+  },
+
+  // ─── Pass 3: Station-scoped consumption (from Inventory page) ────────────
+
+  async recordStationConsumption(stationId, data) {
+    const res = await authFetch(`${BASE_URL}/api/inventory/station/${stationId}/consumption`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await handleResponse(res);
   }
 };
+
 
 
 

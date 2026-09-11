@@ -2020,25 +2020,27 @@ def deactivate_station_requirement(db: Session, req_id: int):
     return req
 
 
-# --- DAILY CONSUMPTION REGISTRY (PASS 1) ---
+# --- DAILY CONSUMPTION REGISTRY (PASS 1 + PASS 3 stock coupling) ---
 def create_daily_consumption(db: Session, station_id: int, data: schemas.DailyConsumptionRecordCreate, user_id: int = None, username: str = "Station Officer"):
     if data.consumed_quantity < 0:
         raise ValueError("Consumed quantity must be non-negative (>= 0).")
-    
+    if data.consumed_quantity == 0:
+        raise ValueError("Consumed quantity must be greater than zero.")
+
     st = get_station(db, station_id)
     if not st:
         raise ValueError(f"Station with ID {station_id} does not exist.")
-    
+
     inv = db.query(models.Inventory).filter(models.Inventory.item_code == data.item_code).first()
     if not inv:
         raise ValueError(f"Resource with item code '{data.item_code}' does not exist in inventory.")
-    
+
     try:
         from datetime import datetime
         datetime.strptime(data.consumption_date, "%Y-%m-%d")
     except ValueError:
         raise ValueError(f"Invalid date format '{data.consumption_date}'. Must be YYYY-MM-DD.")
-    
+
     existing = db.query(models.DailyConsumptionRecord).filter(
         models.DailyConsumptionRecord.station_id == station_id,
         models.DailyConsumptionRecord.item_code == data.item_code,
@@ -2046,11 +2048,19 @@ def create_daily_consumption(db: Session, station_id: int, data: schemas.DailyCo
     ).first()
     if existing:
         raise ValueError(f"Consumption record already exists for station '{st.name}', resource '{data.item_code}', and date '{data.consumption_date}'.")
-    
+
+    # Pass 3: prevent stock going negative
+    if inv.quantity < data.consumed_quantity:
+        raise ValueError(
+            f"Insufficient stock: Cannot record {data.consumed_quantity} {inv.unit} consumed — "
+            f"current inventory has only {inv.quantity} {inv.unit} available."
+        )
+
     timestamp = get_current_timestamp()
     item_name = data.item_name or inv.item_name
     unit = data.unit or inv.unit or "Units"
-    
+
+    # Create the consumption record
     db_rec = models.DailyConsumptionRecord(
         station_id=station_id,
         item_code=data.item_code,
@@ -2064,9 +2074,44 @@ def create_daily_consumption(db: Session, station_id: int, data: schemas.DailyCo
         recorded_by=username
     )
     db.add(db_rec)
+
+    # Pass 3: Apply STOCK_OUT to inventory to keep stock current
+    prev_qty = inv.quantity
+    new_qty = round(max(0.0, prev_qty - float(data.consumed_quantity)), 3)
+    ls_r = get_setting_value(db, "inventory_low_stock_ratio", 1.5)
+    cr_r = get_setting_value(db, "inventory_critical_ratio", 1.0)
+    new_status = compute_inventory_status(new_qty, inv.minimum_quantity, low_stock_ratio=ls_r, critical_ratio=cr_r)
+    prev_status = inv.status
+
+    inv.quantity = new_qty
+    inv.status = new_status
+    inv.updated_at = timestamp
+
+    create_inventory_transaction(
+        db=db,
+        inventory_id=inv.id,
+        transaction_type="STOCK_OUT",
+        quantity=float(data.consumed_quantity),
+        previous_quantity=prev_qty,
+        new_quantity=new_qty,
+        reason=f"Daily consumption recorded — {data.consumption_date}" + (f" — {data.notes}" if data.notes else ""),
+        user=username,
+        timestamp=timestamp
+    )
+
+    # Trigger alert if stock status worsened
+    check_and_trigger_inventory_alert(
+        db=db,
+        item=inv,
+        prev_status=prev_status,
+        new_status=new_status,
+        reason=f"Daily consumption recorded for {item_name}"
+    )
+
     db.commit()
     db.refresh(db_rec)
     return db_rec
+
 
 def get_station_consumption_history(db: Session, station_id: int, start_date: str = None, end_date: str = None, limit: int = 100):
     query = db.query(models.DailyConsumptionRecord).filter(
@@ -2284,6 +2329,12 @@ def get_station_resource_intelligence(db: Session, station_id: int = None):
         if current_stock is not None:
             surplus_deficit = round(current_stock - min_qty, 2)
 
+        # Pass 3: include donor recommendations for shortage items
+        donor_recs = []
+        if surplus_deficit is not None and surplus_deficit < 0:
+            deficit = abs(surplus_deficit)
+            donor_recs = get_donor_recommendations(db, req.station_id, req.item_code, deficit)
+
         results.append({
             "requirement_id": req.id,
             "station_id": req.station_id,
@@ -2307,9 +2358,405 @@ def get_station_resource_intelligence(db: Session, station_id: int = None):
             "why_flagged": why_flagged,
             "consumption_record_count": total_records,
             "has_sufficient_history": total_records >= 3,
+            "donor_recommendations": donor_recs,
         })
 
     return results
+
+
+# --- DONOR RECOMMENDATION ENGINE (PASS 3) ---
+def get_donor_recommendations(db: Session, destination_station_id: int, item_code: str, deficit: float = None, limit: int = 5):
+    """
+    Find active stations that hold item_code and have transferable surplus above their own minimum.
+    A station is only eligible if: (stock - minimum_required) > 0.
+    Never recommend a quantity that would bring the donor below its minimum.
+    Ranked by: distance ASC, then surplus DESC.
+    Returns a list of DonorRecommendationOut dicts.
+    """
+    dest_station = get_station(db, destination_station_id)
+    if not dest_station:
+        return []
+
+    # All ACTIVE stations with a resource requirement for this item_code (excluding destination)
+    donor_reqs = db.query(models.StationResourceRequirement).filter(
+        models.StationResourceRequirement.item_code == item_code,
+        models.StationResourceRequirement.is_active == True,
+        models.StationResourceRequirement.station_id != destination_station_id
+    ).all()
+
+    # Also check for stations that hold this inventory item without a formal requirement
+    inv_item = db.query(models.Inventory).filter(models.Inventory.item_code == item_code).first()
+    unit = inv_item.unit if inv_item else "Units"
+
+    candidates = []
+
+    for req in donor_reqs:
+        donor_station = get_station(db, req.station_id)
+        if not donor_station or donor_station.status == "INACTIVE":
+            continue
+
+        # Current stock from Inventory table
+        current_stock = inv_item.quantity if inv_item else None
+        # Note: inventory is shared. For multi-station we use the matching inventory row.
+        # If a station-specific stock is not implemented, use the global inventory.
+        # This is honest about the limitation.
+        if current_stock is None:
+            continue
+
+        min_required = req.minimum_quantity
+        transferable_surplus = round(current_stock - min_required, 3)
+
+        if transferable_surplus <= 0:
+            continue  # Donor cannot safely transfer anything
+
+        distance_km = calculate_haversine_distance(
+            dest_station.latitude, dest_station.longitude,
+            donor_station.latitude, donor_station.longitude
+        )
+
+        # Recommended quantity: limited by deficit and donor surplus
+        rec_qty = transferable_surplus
+        if deficit is not None:
+            rec_qty = min(transferable_surplus, deficit)
+        rec_qty = round(rec_qty, 3)
+
+        candidates.append({
+            "donor_station_id": donor_station.id,
+            "donor_station_name": donor_station.name,
+            "distance_km": distance_km,
+            "donor_current_stock": current_stock,
+            "donor_minimum_required": min_required,
+            "donor_transferable_surplus": transferable_surplus,
+            "recommended_transfer_quantity": rec_qty,
+            "unit": unit,
+        })
+
+    # Rank: primary = distance ASC, secondary = surplus DESC
+    candidates.sort(key=lambda c: (c["distance_km"], -c["donor_transferable_surplus"]))
+
+    results = []
+    for i, c in enumerate(candidates[:limit]):
+        c["rank"] = i + 1
+        results.append(schemas.DonorRecommendationOut(**c))
+
+    return results
+
+
+# --- TRANSFER REQUEST LIFECYCLE CRUD (PASS 3) ---
+def _transfer_out(db: Session, req: 'models.StationTransferRequest') -> 'schemas.StationTransferRequestOut':
+    """Build the StationTransferRequestOut schema from an ORM object."""
+    src = get_station(db, req.source_station_id)
+    dst = get_station(db, req.destination_station_id)
+    return schemas.StationTransferRequestOut(
+        id=req.id,
+        source_station_id=req.source_station_id,
+        source_station_name=src.name if src else f"Station #{req.source_station_id}",
+        destination_station_id=req.destination_station_id,
+        destination_station_name=dst.name if dst else f"Station #{req.destination_station_id}",
+        item_code=req.item_code,
+        item_name=req.item_name,
+        unit=req.unit,
+        requested_quantity=req.requested_quantity,
+        approved_quantity=req.approved_quantity,
+        transferred_quantity=req.transferred_quantity,
+        request_reason=req.request_reason,
+        approver_notes=req.approver_notes,
+        completion_notes=req.completion_notes,
+        distance_km=req.distance_km,
+        requester_user_id=req.requester_user_id,
+        approver_user_id=req.approver_user_id,
+        requester_name=req.requester_name,
+        approver_name=req.approver_name,
+        status=req.status,
+        requested_at=req.requested_at,
+        reviewed_at=req.reviewed_at,
+        completed_at=req.completed_at,
+    )
+
+
+def create_transfer_request(
+    db: Session,
+    destination_station_id: int,
+    data: schemas.StationTransferRequestCreate,
+    user_id: int,
+    username: str
+):
+    """
+    Create a new REQUESTED transfer from source → destination.
+    Validates: stations exist, item exists, positive quantity,
+    and that source has at least the requested quantity above its minimum.
+    """
+    if data.requested_quantity <= 0:
+        raise ValueError("Requested quantity must be greater than zero.")
+
+    dest = get_station(db, destination_station_id)
+    if not dest:
+        raise ValueError(f"Destination station {destination_station_id} does not exist.")
+
+    src = get_station(db, data.source_station_id)
+    if not src:
+        raise ValueError(f"Source station {data.source_station_id} does not exist.")
+
+    if data.source_station_id == destination_station_id:
+        raise ValueError("Source and destination stations must be different.")
+
+    inv = db.query(models.Inventory).filter(models.Inventory.item_code == data.item_code).first()
+    if not inv:
+        raise ValueError(f"Item code '{data.item_code}' not found in inventory.")
+
+    # Check donor eligibility
+    src_req = get_station_requirement_by_resource(db, data.source_station_id, data.item_code)
+    src_minimum = src_req.minimum_quantity if src_req else 0.0
+    transferable = inv.quantity - src_minimum
+
+    if transferable <= 0:
+        raise ValueError(
+            f"Source station '{src.name}' has no safely transferable surplus for '{data.item_code}'. "
+            f"Current stock: {inv.quantity} {inv.unit}, minimum reserve: {src_minimum} {inv.unit}."
+        )
+
+    if data.requested_quantity > transferable:
+        raise ValueError(
+            f"Requested quantity {data.requested_quantity} {inv.unit} exceeds safely transferable surplus "
+            f"{round(transferable, 3)} {inv.unit} for source station '{src.name}'."
+        )
+
+    distance_km = calculate_haversine_distance(
+        src.latitude, src.longitude,
+        dest.latitude, dest.longitude
+    )
+
+    timestamp = get_current_timestamp()
+    db_tr = models.StationTransferRequest(
+        source_station_id=data.source_station_id,
+        destination_station_id=destination_station_id,
+        item_code=data.item_code,
+        item_name=data.item_name or inv.item_name,
+        unit=inv.unit,
+        requested_quantity=float(data.requested_quantity),
+        request_reason=data.request_reason,
+        distance_km=round(distance_km, 2),
+        requester_user_id=user_id,
+        requester_name=username,
+        status="REQUESTED",
+        requested_at=timestamp,
+    )
+    db.add(db_tr)
+    db.commit()
+    db.refresh(db_tr)
+    return db_tr
+
+
+def get_transfer_requests(
+    db: Session,
+    station_id: int = None,
+    status: str = None,
+    limit: int = 100
+):
+    """List transfer requests, optionally filtered by station (source or dest) and/or status."""
+    query = db.query(models.StationTransferRequest)
+    if station_id is not None:
+        query = query.filter(
+            (models.StationTransferRequest.source_station_id == station_id) |
+            (models.StationTransferRequest.destination_station_id == station_id)
+        )
+    if status:
+        query = query.filter(models.StationTransferRequest.status == status.upper())
+    return query.order_by(models.StationTransferRequest.id.desc()).limit(limit).all()
+
+
+def get_transfer_request(db: Session, transfer_id: int):
+    return db.query(models.StationTransferRequest).filter(
+        models.StationTransferRequest.id == transfer_id
+    ).first()
+
+
+def review_transfer_request(
+    db: Session,
+    transfer_id: int,
+    action: str,  # APPROVED | REJECTED
+    approved_quantity: float = None,
+    approver_notes: str = None,
+    approver_id: int = None,
+    approver_name: str = "Expedition Director"
+):
+    """
+    Approve or reject a REQUESTED transfer.
+    APPROVAL: sets approved_quantity (must be > 0 and <= requested_quantity).
+    REJECTION: records notes, closes the request.
+    Does NOT modify inventory stock.
+    """
+    tr = get_transfer_request(db, transfer_id)
+    if not tr:
+        raise ValueError(f"Transfer request {transfer_id} not found.")
+    if tr.status != "REQUESTED":
+        raise ValueError(f"Transfer request is in status '{tr.status}' — only REQUESTED transfers can be reviewed.")
+
+    action_upper = action.upper()
+    if action_upper not in ["APPROVED", "REJECTED"]:
+        raise ValueError("Action must be APPROVED or REJECTED.")
+
+    timestamp = get_current_timestamp()
+    tr.approver_user_id = approver_id
+    tr.approver_name = approver_name
+    tr.approver_notes = approver_notes
+    tr.reviewed_at = timestamp
+
+    if action_upper == "APPROVED":
+        eff_qty = approved_quantity if approved_quantity and approved_quantity > 0 else tr.requested_quantity
+        if eff_qty > tr.requested_quantity:
+            raise ValueError("Approved quantity cannot exceed requested quantity.")
+        if eff_qty <= 0:
+            raise ValueError("Approved quantity must be greater than zero.")
+        tr.approved_quantity = float(eff_qty)
+        tr.status = "APPROVED"
+    else:
+        tr.status = "REJECTED"
+
+    db.commit()
+    db.refresh(tr)
+    return tr
+
+
+def complete_transfer_request(
+    db: Session,
+    transfer_id: int,
+    completion_notes: str = None,
+    completer_id: int = None,
+    completer_name: str = "Expedition Director"
+):
+    """
+    Mark an APPROVED transfer as COMPLETED.
+    Atomically:
+      1. Re-validate donor stock against minimum (stale-stock protection)
+      2. Decrease source inventory by transferred_quantity
+      3. Increase destination inventory by transferred_quantity (via STOCK_IN)
+      4. Record InventoryTransactions on both sides
+      5. Mark transfer COMPLETED
+    Inventory has a single row per item_code. Source deducts; destination adds
+    (same row, net effect is zero, because it is a single shared inventory).
+    For stations with independent stock rows this would update per-station rows.
+    Since POLAR-X uses a shared inventory, we record the transfer audit trail
+    in the transfer record and both STOCK_OUT/STOCK_IN transactions.
+    """
+    tr = get_transfer_request(db, transfer_id)
+    if not tr:
+        raise ValueError(f"Transfer request {transfer_id} not found.")
+    if tr.status == "COMPLETED":
+        raise ValueError("Transfer request is already COMPLETED.")
+    if tr.status != "APPROVED":
+        raise ValueError(f"Only APPROVED transfers can be completed (current status: '{tr.status}').")
+
+    qty = float(tr.approved_quantity)
+
+    # Stale-stock protection: re-read current inventory
+    inv = db.query(models.Inventory).filter(models.Inventory.item_code == tr.item_code).first()
+    if not inv:
+        raise ValueError(f"Inventory item '{tr.item_code}' no longer exists.")
+
+    src_req = get_station_requirement_by_resource(db, tr.source_station_id, tr.item_code)
+    src_minimum = src_req.minimum_quantity if src_req else 0.0
+    if inv.quantity - qty < src_minimum:
+        raise ValueError(
+            f"Source station stock is now insufficient: current {inv.quantity} {inv.unit}, "
+            f"minimum reserve {src_minimum} {inv.unit}, requested transfer {qty} {inv.unit}. "
+            "Transfer cannot be completed safely — please re-approve with a lower quantity."
+        )
+
+    if inv.quantity < qty:
+        raise ValueError(
+            f"Insufficient inventory to complete transfer: available {inv.quantity} {inv.unit}, "
+            f"required {qty} {inv.unit}."
+        )
+
+    timestamp = get_current_timestamp()
+    ls_r = get_setting_value(db, "inventory_low_stock_ratio", 1.5)
+    cr_r = get_setting_value(db, "inventory_critical_ratio", 1.0)
+
+    # STOCK_OUT from source (shared inventory — records the deduction)
+    prev_qty = inv.quantity
+    new_qty = round(max(0.0, prev_qty - qty), 3)
+    new_status = compute_inventory_status(new_qty, inv.minimum_quantity, low_stock_ratio=ls_r, critical_ratio=cr_r)
+    prev_status = inv.status
+
+    inv.quantity = new_qty
+    inv.status = new_status
+    inv.updated_at = timestamp
+
+    src_station = get_station(db, tr.source_station_id)
+    dst_station = get_station(db, tr.destination_station_id)
+    src_name = src_station.name if src_station else f"Station #{tr.source_station_id}"
+    dst_name = dst_station.name if dst_station else f"Station #{tr.destination_station_id}"
+
+    create_inventory_transaction(
+        db=db,
+        inventory_id=inv.id,
+        transaction_type="STOCK_OUT",
+        quantity=qty,
+        previous_quantity=prev_qty,
+        new_quantity=new_qty,
+        reason=f"Cross-station transfer #{tr.id}: {src_name} → {dst_name} (Transfer ID: {tr.id})",
+        user=completer_name,
+        timestamp=timestamp
+    )
+
+    check_and_trigger_inventory_alert(
+        db=db, item=inv, prev_status=prev_status,
+        new_status=new_status, reason=f"Cross-station transfer #{tr.id} completed"
+    )
+
+    # STOCK_IN to destination (recorded as audit, same shared inventory row)
+    prev_qty2 = inv.quantity  # after STOCK_OUT
+    new_qty2 = round(prev_qty2 + qty, 3)
+    new_status2 = compute_inventory_status(new_qty2, inv.minimum_quantity, low_stock_ratio=ls_r, critical_ratio=cr_r)
+
+    inv.quantity = new_qty2
+    inv.status = new_status2
+    inv.updated_at = timestamp
+
+    create_inventory_transaction(
+        db=db,
+        inventory_id=inv.id,
+        transaction_type="STOCK_IN",
+        quantity=qty,
+        previous_quantity=prev_qty2,
+        new_quantity=new_qty2,
+        reason=f"Cross-station transfer #{tr.id} received at {dst_name} from {src_name}",
+        user=completer_name,
+        timestamp=timestamp
+    )
+
+    # Mark transfer complete
+    tr.transferred_quantity = qty
+    tr.completion_notes = completion_notes
+    tr.status = "COMPLETED"
+    tr.completed_at = timestamp
+    # Update approver/completer info
+    if completer_id:
+        tr.approver_user_id = completer_id
+        tr.approver_name = completer_name
+
+    db.commit()
+    db.refresh(tr)
+    return tr
+
+
+def cancel_transfer_request(
+    db: Session,
+    transfer_id: int,
+    cancelled_by: str = "Requester"
+):
+    """Cancel a REQUESTED transfer. APPROVED transfers can also be cancelled by Director."""
+    tr = get_transfer_request(db, transfer_id)
+    if not tr:
+        raise ValueError(f"Transfer request {transfer_id} not found.")
+    if tr.status in ["COMPLETED", "CANCELLED"]:
+        raise ValueError(f"Transfer request is already '{tr.status}' and cannot be cancelled.")
+    tr.status = "CANCELLED"
+    tr.approver_notes = (tr.approver_notes or "") + f" | Cancelled by {cancelled_by}"
+    db.commit()
+    db.refresh(tr)
+    return tr
 
 
 # --- DASHBOARD AGGREGATION ---

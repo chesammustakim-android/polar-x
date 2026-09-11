@@ -37,6 +37,18 @@ def run_test(name, fn):
         FAIL += 1
         RESULTS.append(f"  [ERROR] {name}: {type(e).__name__}: {e}")
 
+import pytest
+
+@pytest.fixture(scope="module")
+def db():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    session = TestingSessionLocal()
+    seed_test_data(session)
+    yield session
+    session.close()
+    engine.dispose()
+
 def get_db():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
