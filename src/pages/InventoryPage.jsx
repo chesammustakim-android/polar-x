@@ -611,9 +611,10 @@ export function RequestTransferModal({ destStation, stations = [], itemInfo, onC
   );
 }
 
-// ─── TRANSFER MANAGEMENT PANEL (PASS 3) ──────────────────────────────────────
-function TransferManagementPanel({ transfers = [], loading, isDirectorOrAdmin, onRefresh, onAction }) {
+function TransferManagementPanel({ transfers = [], loading, isDirectorOrAdmin, currentUser, onRefresh, onAction }) {
   const [expanded, setExpanded] = useState(null);
+  const user = currentUser || api.getStoredUser() || {};
+  const canCancel = (tr) => isDirectorOrAdmin || (user.role === 'STATION_HEAD' && tr.status === 'REQUESTED' && (tr.destination_station_id === user.assigned_station_id || tr.source_station_id === user.assigned_station_id));
 
   const STATUS_COLORS = {
     REQUESTED: { color: 'var(--cyan-300)', bg: 'rgba(6,182,212,0.08)', border: 'rgba(6,182,212,0.2)' },
@@ -792,10 +793,12 @@ function TransferManagementPanel({ transfers = [], loading, isDirectorOrAdmin, o
                               Complete Transfer
                             </button>
                           )}
-                          <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px', color: 'var(--text-muted)' }}
-                            onClick={() => doCancel(tr.id)} disabled={actionBusy}>
-                            <X size={12} /> Cancel Request
-                          </button>
+                          {canCancel(tr) && (
+                            <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px', color: 'var(--text-muted)' }}
+                              onClick={() => doCancel(tr.id)} disabled={actionBusy}>
+                              <X size={12} /> Cancel Request
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1686,6 +1689,9 @@ export default function InventoryPage({ currentUser }) {
   const userRole = (user.role || '').toUpperCase();
   const isStationHead = userRole === 'STATION_HEAD';
   const isDirectorOrAdmin = userRole === 'ADMIN' || userRole === 'EXPEDITION_DIRECTOR';
+  const canAddInventory = isDirectorOrAdmin || userRole === 'LOGISTICS_OFFICER';
+  const canRecordConsumption = isDirectorOrAdmin || isStationHead;
+  const canPerformStockOp = isDirectorOrAdmin || userRole === 'LOGISTICS_OFFICER';
 
   const [viewMode, setViewMode] = useState('catalog'); // 'catalog' | 'station-requirements' | 'readiness' | 'transfers'
   const [items, setItems] = useState([]);
@@ -1871,19 +1877,23 @@ export default function InventoryPage({ currentUser }) {
             Sync Stock
           </button>
           {/* Pass 3: Record Consumption button */}
-          <button
-            className="btn-secondary"
-            onClick={() => setShowConsumptionModal(true)}
-            title="Record daily resource consumption (updates inventory stock)"
-            style={{ padding: '8px 12px', color: 'var(--hazard-green)', borderColor: 'rgba(16,185,129,0.3)' }}
-          >
-            <ClipboardList size={14} />
-            Record Consumption
-          </button>
-          <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-            <Plus size={14} />
-            Add Item
-          </button>
+          {canRecordConsumption && (
+            <button
+              className="btn-secondary"
+              onClick={() => setShowConsumptionModal(true)}
+              title="Record daily resource consumption (updates inventory stock)"
+              style={{ padding: '8px 12px', color: 'var(--hazard-green)', borderColor: 'rgba(16,185,129,0.3)' }}
+            >
+              <ClipboardList size={14} />
+              Record Consumption
+            </button>
+          )}
+          {canAddInventory && (
+            <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+              <Plus size={14} />
+              Add Item
+            </button>
+          )}
         </div>
       </div>
 
@@ -2102,13 +2112,15 @@ export default function InventoryPage({ currentUser }) {
                             >
                               <Eye size={12} /> View
                             </button>
-                            <button
-                              className="inv-action-btn btn-stock-quick"
-                              onClick={() => setStockModalItem(item)}
-                              title="Perform Stock In / Stock Out / Adjustment"
-                            >
-                              <Edit3 size={12} /> Stock Op
-                            </button>
+                            {canPerformStockOp && (
+                              <button
+                                className="inv-action-btn btn-stock-quick"
+                                onClick={() => setStockModalItem(item)}
+                                title="Perform Stock In / Stock Out / Adjustment"
+                              >
+                                <Edit3 size={12} /> Stock Op
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -2153,6 +2165,7 @@ export default function InventoryPage({ currentUser }) {
           transfers={transfers}
           loading={transfersLoading}
           isDirectorOrAdmin={isDirectorOrAdmin}
+          currentUser={user}
           onRefresh={loadTransfers}
         />
       )}

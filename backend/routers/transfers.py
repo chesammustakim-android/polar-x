@@ -1,4 +1,4 @@
-﻿from typing import List, Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -37,10 +37,9 @@ def list_transfers(
         if not station_id:
             raise HTTPException(status_code=400, detail="Station Head account not assigned to a station.")
         raw_list = crud.get_transfer_requests(db, station_id=station_id, status=status_filter)
-    elif role in ["ADMIN", "EXPEDITION_DIRECTOR"]:
-        raw_list = crud.get_transfer_requests(db, station_id=None, status=status_filter)
     else:
-        raise HTTPException(status_code=403, detail="Insufficient privileges to view transfer requests.")
+        # All other authenticated operational roles have global operational visibility
+        raw_list = crud.get_transfer_requests(db, station_id=None, status=status_filter)
 
     results = []
     for tr in raw_list:

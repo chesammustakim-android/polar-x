@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import crud, schemas
+from .. import crud, schemas, models
 
 router = APIRouter(prefix="/api/personnel", tags=["Personnel Management & Movement Tracking"])
 
@@ -45,8 +45,38 @@ def read_personnel_detail(personnel_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Personnel with ID {personnel_id} not found")
     return detail
 
+from .. import crud, schemas, models
+from ..auth import get_current_user
+
+
+def require_personnel_manager(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user has Personnel roster management authority."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "EXPEDITION_LEADER"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Personnel roster management requires EXPEDITION_LEADER, EXPEDITION_DIRECTOR, or ADMIN authority. Your role: {current_user.role}"
+        )
+    return current_user
+
+
+def require_location_updater(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user can update field personnel locations."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "EXPEDITION_LEADER", "FIELD_OPERATOR", "SAR_OFFICER"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Field location updates require authorized operational role. Your role: {current_user.role}"
+        )
+    return current_user
+
+
 @router.post("", response_model=schemas.PersonnelOut, status_code=status.HTTP_201_CREATED)
-def create_personnel_member(person: schemas.PersonnelCreate, db: Session = Depends(get_db)):
+def create_personnel_member(
+    person: schemas.PersonnelCreate, 
+    current_user: models.User = Depends(require_personnel_manager),
+    db: Session = Depends(get_db)
+):
     """
     Register a new personnel member on the expedition roster.
     Validates numeric coordinates (-90 to 90 lat, -180 to 180 long).
@@ -67,6 +97,7 @@ def create_personnel_member(person: schemas.PersonnelCreate, db: Session = Depen
 def update_personnel_member(
     personnel_id: int, 
     person_update: schemas.PersonnelUpdate, 
+    current_user: models.User = Depends(require_personnel_manager),
     db: Session = Depends(get_db)
 ):
     """Update personnel metadata (name, role, department, contact, assigned expedition)."""
@@ -84,6 +115,7 @@ def update_personnel_member(
 def update_personnel_location(
     personnel_id: int,
     location_update: schemas.PersonnelLocationUpdate,
+    current_user: models.User = Depends(require_location_updater),
     db: Session = Depends(get_db)
 ):
     """

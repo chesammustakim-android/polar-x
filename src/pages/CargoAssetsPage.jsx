@@ -292,7 +292,7 @@ function StatusUpdateForm({ cargo, onUpdated }) {
 }
 
 // ─── Cargo Detail Panel ───────────────────────────────────────────────────────
-function CargoDetailPanel({ cargoId, onClose, onRefreshList }) {
+function CargoDetailPanel({ cargoId, onClose, onRefreshList, canUpdateCargo = true }) {
   const [detail, setDetail] = useState(null);
   const [movements, setMovements] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
@@ -320,7 +320,7 @@ function CargoDetailPanel({ cargoId, onClose, onRefreshList }) {
     { key: 'overview',  label: 'Overview',  icon: Info },
     { key: 'timeline',  label: 'Timeline',  icon: Truck },
     { key: 'history',   label: 'Movement',  icon: History },
-    { key: 'update',    label: 'Update',    icon: Edit3 },
+    ...(canUpdateCargo ? [{ key: 'update',    label: 'Update',    icon: Edit3 }] : []),
     { key: 'qr',        label: 'QR Code',   icon: QrCode },
   ];
 
@@ -659,7 +659,12 @@ function AddCargoModal({ onClose, onCreated }) {
 }
 
 // ─── Main: CargoAssetsPage ────────────────────────────────────────────────────
-export default function CargoAssetsPage({ initialExpeditionId, initialCargoId, onSelectCargo }) {
+export default function CargoAssetsPage({ initialExpeditionId, initialCargoId, onSelectCargo, currentUser }) {
+  const user = currentUser || api.getStoredUser() || {};
+  const userRole = (user.role || '').toUpperCase();
+  const canRegisterCargo = ['ADMIN', 'EXPEDITION_DIRECTOR', 'LOGISTICS_OFFICER'].includes(userRole);
+  const canUpdateCargo = ['ADMIN', 'EXPEDITION_DIRECTOR', 'LOGISTICS_OFFICER', 'FIELD_OPERATOR'].includes(userRole);
+
   const [cargoList, setCargoList]       = useState([]);
   const [stats, setStats]               = useState(null);
   const [loading, setLoading]           = useState(true);
@@ -752,10 +757,12 @@ export default function CargoAssetsPage({ initialExpeditionId, initialCargoId, o
             <RefreshCw size={14} className={loading ? 'radar-sweep-icon' : ''} />
             Refresh
           </button>
-          <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-            <Plus size={14} />
-            Register Cargo
-          </button>
+          {canRegisterCargo && (
+            <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+              <Plus size={14} />
+              Register Cargo
+            </button>
+          )}
         </div>
       </div>
 
@@ -939,6 +946,7 @@ export default function CargoAssetsPage({ initialExpeditionId, initialCargoId, o
       {selectedCargoId && (
         <CargoDetailPanel
           cargoId={selectedCargoId}
+          canUpdateCargo={canUpdateCargo}
           onClose={() => setSelectedCargoId(null)}
           onRefreshList={loadCargo}
         />

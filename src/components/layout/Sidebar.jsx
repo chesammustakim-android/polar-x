@@ -19,14 +19,19 @@ import {
 import { SYSTEM_META } from '../../data/mockData';
 import { api } from '../../services/api';
 
+const OPERATIONAL_TABS = [
+  'dashboard', 'expeditions', 'stations', 'cargo', 'inventory', 
+  'personnel', 'map', 'emergency', 'automation', 'reports', 'settings'
+];
+
 const ROLE_PERMISSIONS = {
-  ADMIN: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'stations', 'settings'],
-  EXPEDITION_DIRECTOR: ['dashboard', 'expeditions', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'automation', 'stations'],
-  STATION_HEAD: ['dashboard', 'stations', 'inventory', 'map'],
-  LOGISTICS_OFFICER: ['dashboard', 'cargo', 'inventory', 'expeditions', 'reports', 'map', 'automation'],
-  EXPEDITION_LEADER: ['dashboard', 'expeditions', 'personnel', 'map', 'emergency', 'reports', 'automation'],
-  SAR_OFFICER: ['dashboard', 'emergency', 'map', 'personnel', 'reports', 'automation'],
-  FIELD_OPERATOR: ['dashboard', 'personnel', 'map', 'automation']
+  ADMIN: [...OPERATIONAL_TABS, 'admin'],
+  EXPEDITION_DIRECTOR: [...OPERATIONAL_TABS],
+  STATION_HEAD: [...OPERATIONAL_TABS],
+  LOGISTICS_OFFICER: [...OPERATIONAL_TABS],
+  EXPEDITION_LEADER: [...OPERATIONAL_TABS],
+  SAR_OFFICER: [...OPERATIONAL_TABS],
+  FIELD_OPERATOR: [...OPERATIONAL_TABS]
 };
 
 export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleCollapse, criticalAlertCount = 2, currentUser }) {

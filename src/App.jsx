@@ -213,8 +213,9 @@ export default function App() {
   }
 
   // Role permissions check
+  // Role permissions check — all operational roles have full visibility across operational tabs
   const allowedTabs = currentUser?.permissions || [
-    'dashboard', 'expeditions', 'stations', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'reports', 'settings'
+    'dashboard', 'expeditions', 'stations', 'cargo', 'inventory', 'personnel', 'map', 'emergency', 'automation', 'reports', 'settings'
   ];
 
   const renderActivePage = () => {
@@ -247,6 +248,7 @@ export default function App() {
             onSelectCargo={(cargo) => setSelectedCargo(cargo)}
             initialExpeditionId={expeditionNavFilter?.expeditionId || null}
             initialCargoId={selectedCargo?.id || null}
+            currentUser={currentUser}
           />
         );
       case 'inventory':
@@ -258,6 +260,7 @@ export default function App() {
             onSelectPersonnel={(person) => setSelectedPerson(person)}
             initialExpeditionId={expeditionNavFilter?.expeditionId || null}
             initialPersonId={selectedPerson?.id || null}
+            currentUser={currentUser}
           />
         );
       case 'map':
@@ -277,14 +280,15 @@ export default function App() {
       case 'emergency':
         return (
           <EmergencyPage 
+            currentUser={currentUser}
             onSelectAlert={handleOpenAlert} 
             onAlertStateChange={() => setAlertsRefreshKey(k => k + 1)}
           />
         );
       case 'automation':
-        return <SmartAutomationPage />;
+        return <SmartAutomationPage currentUser={currentUser} />;
       case 'reports':
-        return <ReportsPage />;
+        return <ReportsPage currentUser={currentUser} />;
       case 'stations':
         return <StationManagementPage currentUser={currentUser} />;
       case 'settings':

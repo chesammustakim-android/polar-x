@@ -19,35 +19,25 @@ DEFAULT_TOKEN_EXPIRY_HOURS = 24
 
 security_bearer = HTTPBearer(auto_error=False)
 
-# Role Permission Mapping
+OPERATIONAL_MODULES = [
+    "dashboard", "expeditions", "stations", "cargo", "inventory", 
+    "personnel", "map", "emergency", "automation", "reports", "settings"
+]
+
+# Role Permission Mapping — All operational roles have full view access across operational modules;
+# write/modify authority is enforced at the endpoint/action level.
 ROLE_PERMISSIONS = {
-    "ADMIN": [
-        "dashboard", "expeditions", "cargo", "inventory", 
-        "personnel", "map", "emergency", "reports", "automation", "settings", "stations", "admin"
-    ],
-    "EXPEDITION_DIRECTOR": [
-        "dashboard", "expeditions", "cargo", "inventory", 
-        "personnel", "map", "emergency", "reports", "automation", "stations"
-    ],
-    "STATION_HEAD": [
-        "dashboard", "stations", "inventory", "map"
-    ],
-    "LOGISTICS_OFFICER": [
-        "dashboard", "cargo", "inventory", "expeditions", "reports", "map", "automation"
-    ],
-    "EXPEDITION_LEADER": [
-        "dashboard", "expeditions", "personnel", "map", "emergency", "reports", "automation"
-    ],
-    "SAR_OFFICER": [
-        "dashboard", "emergency", "map", "personnel", "reports", "automation"
-    ],
-    "FIELD_OPERATOR": [
-        "dashboard", "personnel", "map", "automation"
-    ]
+    "ADMIN": [*OPERATIONAL_MODULES, "admin"],
+    "EXPEDITION_DIRECTOR": list(OPERATIONAL_MODULES),
+    "STATION_HEAD": list(OPERATIONAL_MODULES),
+    "LOGISTICS_OFFICER": list(OPERATIONAL_MODULES),
+    "EXPEDITION_LEADER": list(OPERATIONAL_MODULES),
+    "SAR_OFFICER": list(OPERATIONAL_MODULES),
+    "FIELD_OPERATOR": list(OPERATIONAL_MODULES)
 }
 
 def get_role_permissions(role: str) -> List[str]:
-    return ROLE_PERMISSIONS.get(role.upper(), ["dashboard", "personnel", "map"])
+    return ROLE_PERMISSIONS.get(role.upper(), list(OPERATIONAL_MODULES))
 
 def hash_password(password: str) -> str:
     """

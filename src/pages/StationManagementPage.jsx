@@ -292,12 +292,10 @@ export default function StationManagementPage({ currentUser }) {
     }
   };
 
-  // Filtered stations
+  const canLogConsumption = canManage || (isStationHead && user.assigned_station_id === selectedStation?.id);
+
+  // Filtered stations — all operational roles have full visibility across stations
   const filteredStations = stations.filter(s => {
-    // If station head, only show assigned station
-    if (isStationHead && user.assigned_station_id && s.id !== user.assigned_station_id) {
-      return false;
-    }
     const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
       (s.region && s.region.toLowerCase().includes(search.toLowerCase())) ||
       (s.type && s.type.toLowerCase().includes(search.toLowerCase()));
@@ -329,11 +327,11 @@ export default function StationManagementPage({ currentUser }) {
             </div>
             <div>
               <h1 style={{ fontSize: '20px', fontWeight: '800', color: '#fff', margin: 0, letterSpacing: '0.5px' }}>
-                {isStationHead ? `Station Command — ${user.assigned_station_name || selectedStation?.name || 'Assigned Station'}` : 'Polar Station & Facility Management'}
+                {isStationHead ? `Station Command — ${user.assigned_station_name || 'Assigned Station'}` : 'Polar Station & Facility Management'}
               </h1>
               <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
                 {isStationHead
-                  ? 'Station-scoped operational registry: monitor minimum buffer requirements & record daily operational consumption.'
+                  ? 'Global facility operational picture: view all Antarctic stations; modification authority scoped to your assigned station.'
                   : 'NCPOR expedition directorate: manage permanent research bases, field outposts, buffer requirements & consumption.'}
               </p>
             </div>
@@ -364,7 +362,7 @@ export default function StationManagementPage({ currentUser }) {
             </button>
           )}
 
-          {selectedStation && (
+          {selectedStation && canLogConsumption && (
             <button
               className="btn-secondary"
               onClick={() => {

@@ -32,7 +32,7 @@ import StatusBadge from '../components/common/StatusBadge';
 import QuickModal from '../components/common/QuickModal';
 import { RequestTransferModal } from './InventoryPage';
 
-export default function SmartAutomationPage() {
+export default function SmartAutomationPage({ currentUser }) {
   const [activeTab, setActiveTab] = useState('overview'); // overview, expeditions, inventory, cargo, personnel, emergency
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
@@ -53,8 +53,16 @@ export default function SmartAutomationPage() {
   const [actionFeedback, setActionFeedback] = useState(null);
   const [selectedExplainInv, setSelectedExplainInv] = useState(null);
 
-  const currentUser = api.getStoredUser();
-  const canRequestTransfer = currentUser && ['ADMIN', 'EXPEDITION_DIRECTOR', 'STATION_HEAD'].includes((currentUser.role || '').toUpperCase());
+  const user = currentUser || api.getStoredUser() || {};
+  const userRole = (user.role || '').toUpperCase();
+  const isStationHead = userRole === 'STATION_HEAD';
+  const canRequestTransfer = ['ADMIN', 'EXPEDITION_DIRECTOR', 'STATION_HEAD'].includes(userRole);
+
+  const canRequestForStation = (targetStationId) => {
+    if (!canRequestTransfer) return false;
+    if (isStationHead) return !targetStationId || targetStationId === user.assigned_station_id;
+    return true;
+  };
 
   // Station Intelligence Map keyed by item_code
   const intelByCode = React.useMemo(() => {
@@ -115,8 +123,12 @@ export default function SmartAutomationPage() {
 
   const handleOpenTransfer = (inv, si, preselectedDonor = null) => {
     if (!canRequestTransfer) return;
-    const targetStationId = si?.station_id || currentUser?.assigned_station_id || (stations[0]?.id);
-    const targetStationName = si?.station_name || currentUser?.assigned_station_name || inv.station_name || 'Station';
+    const targetStationId = isStationHead ? (user.assigned_station_id || si?.station_id) : (si?.station_id || user?.assigned_station_id || stations[0]?.id);
+    const targetStationName = (isStationHead && user.assigned_station_name) ? user.assigned_station_name : (si?.station_name || user?.assigned_station_name || inv.station_name || 'Station');
+    if (isStationHead && si?.station_id && user.assigned_station_id && si.station_id !== user.assigned_station_id) {
+      alert("Station Heads can only initiate transfer requests for their assigned station.");
+      return;
+    }
     const currentStock = si?.current_stock ?? inv.quantity;
     const minQty = si?.minimum_quantity ?? inv.minimum_quantity;
     const deficitVal = Math.max(0, minQty - currentStock);
@@ -141,8 +153,8 @@ export default function SmartAutomationPage() {
       else setLoading(true);
       setError(null);
 
-      const user = api.getStoredUser();
-      const stationIdParam = user?.role === 'STATION_HEAD' ? user.assigned_station_id : null;
+      // Operational visibility: All roles view global station predictive intelligence
+      const stationIdParam = null;
 
       const [sumRes, expRes, invRes, crgRes, persRes, emRes, recRes, intelRes, transRes, stationsRes] = await Promise.all([
         api.getAutomationSummary(),
@@ -838,7 +850,7 @@ export default function SmartAutomationPage() {
                               <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.2' }}>
                                 {topDonor.reason}
                               </div>
-                              {canRequestTransfer && (
+                              {canRequestForStation(enrichedInv.station_id || si?.station_id) && (
                                 <button
                                   className="btn-primary"
                                   onClick={(e) => { e.stopPropagation(); handleOpenTransfer(inv, si, topDonor); }}
@@ -877,7 +889,7 @@ export default function SmartAutomationPage() {
                           >
                             <Eye size={12} /> Explain
                           </button>
-                          {canRequestTransfer && deficit > 0 && (
+                          {canRequestForStation(enrichedInv.station_id || si?.station_id) && deficit > 0 && (
                             <button
                               className="inv-action-btn"
                               onClick={() => handleOpenTransfer(inv, si)}

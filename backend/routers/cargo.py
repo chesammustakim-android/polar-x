@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import crud, schemas
+from .. import crud, schemas, models
 
 router = APIRouter(prefix="/api/cargo", tags=["Cargo & Asset Management"])
 
@@ -45,8 +45,37 @@ def read_cargo_detail(cargo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Cargo with ID {cargo_id} not found")
     return cargo
 
+from ..auth import get_current_user
+
+
+def require_cargo_manager(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user has Cargo / Logistics management authority."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "LOGISTICS_OFFICER"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cargo management requires LOGISTICS_OFFICER, EXPEDITION_DIRECTOR, or ADMIN authority. Your role: {current_user.role}"
+        )
+    return current_user
+
+
+def require_movement_updater(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user can record cargo movement checkpoints."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "LOGISTICS_OFFICER", "FIELD_OPERATOR"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Cargo movement logging requires field or logistics authority. Your role: {current_user.role}"
+        )
+    return current_user
+
+
 @router.post("", response_model=schemas.CargoOut, status_code=status.HTTP_201_CREATED)
-def create_cargo_item(cargo: schemas.CargoCreate, db: Session = Depends(get_db)):
+def create_cargo_item(
+    cargo: schemas.CargoCreate, 
+    current_user: models.User = Depends(require_cargo_manager),
+    db: Session = Depends(get_db)
+):
     """Register a new cargo asset manifest and create initial movement record."""
     # Check if cargo_code already exists
     existing = crud.get_cargo_by_code(db, cargo_code=cargo.cargo_code)
@@ -55,7 +84,12 @@ def create_cargo_item(cargo: schemas.CargoCreate, db: Session = Depends(get_db))
     return crud.create_cargo(db=db, cargo=cargo)
 
 @router.put("/{cargo_id}", response_model=schemas.CargoOut)
-def update_cargo_item(cargo_id: int, cargo_update: schemas.CargoUpdate, db: Session = Depends(get_db)):
+def update_cargo_item(
+    cargo_id: int, 
+    cargo_update: schemas.CargoUpdate, 
+    current_user: models.User = Depends(require_cargo_manager),
+    db: Session = Depends(get_db)
+):
     """
     Update cargo status, location, notes, or ETA.
     Automatically creates a movement history entry.
@@ -74,7 +108,12 @@ def read_cargo_history(cargo_id: int, db: Session = Depends(get_db)):
     return crud.get_cargo_movements(db, cargo_id=cargo_id)
 
 @router.post("/{cargo_id}/movement", response_model=schemas.CargoMovementOut, status_code=status.HTTP_201_CREATED)
-def add_cargo_movement(cargo_id: int, movement: schemas.CargoMovementCreate, db: Session = Depends(get_db)):
+def add_cargo_movement(
+    cargo_id: int, 
+    movement: schemas.CargoMovementCreate, 
+    current_user: models.User = Depends(require_movement_updater),
+    db: Session = Depends(get_db)
+):
     """Manually append a movement checkpoint to cargo history and update current location."""
     cargo = crud.get_cargo(db, cargo_id=cargo_id)
     if not cargo:

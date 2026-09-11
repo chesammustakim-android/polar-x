@@ -2,7 +2,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from .. import crud, schemas
+from .. import crud, schemas, models
 
 router = APIRouter(prefix="/api/incidents", tags=["Emergency Response & SAR Incidents"])
 
@@ -77,10 +77,37 @@ def create_new_incident(inc: schemas.IncidentCreate, db: Session = Depends(get_d
 
     return crud.create_incident(db, inc, actor=inc.reported_by)
 
+from .. import crud, schemas, models
+from ..auth import get_current_user
+
+
+def require_sar_operator(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user has Emergency Response / SAR authority."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "SAR_OFFICER"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"SAR incident operations require SAR_OFFICER, EXPEDITION_DIRECTOR, or ADMIN authority. Your role: {current_user.role}"
+        )
+    return current_user
+
+
+def require_sar_or_field_lead(current_user: models.User = Depends(get_current_user)) -> models.User:
+    """Enforces that the user is an authorized SAR or Field lead to start on-scene mission."""
+    role = (current_user.role or "").upper()
+    if role not in ["ADMIN", "EXPEDITION_DIRECTOR", "SAR_OFFICER", "FIELD_OPERATOR"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Mission operations require authorized field or SAR lead role. Your role: {current_user.role}"
+        )
+    return current_user
+
+
 @router.put("/{incident_id}", response_model=schemas.IncidentOut)
 def update_incident_info(
     incident_id: int,
     inc_update: schemas.IncidentUpdate,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Update general incident metadata and coordinates."""
@@ -121,10 +148,11 @@ def get_recommended_units(incident_id: int, db: Session = Depends(get_db)):
 def acknowledge_incident_route(
     incident_id: int,
     action: schemas.IncidentActionUpdate = None,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Operator acknowledgement of reported emergency incident."""
-    actor = action.actor if action else "Logistics Director"
+    actor = (action.actor if action and action.actor else None) or current_user.full_name or current_user.username
     notes = action.notes if action else None
     result, err = crud.acknowledge_incident(db, incident_id=incident_id, actor=actor, notes=notes)
     if err:
@@ -135,6 +163,7 @@ def acknowledge_incident_route(
 def triage_incident_route(
     incident_id: int,
     triage_update: schemas.IncidentTriageUpdate,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Update incident severity and transition to TRIAGED state with audit record."""
@@ -147,6 +176,7 @@ def triage_incident_route(
 def assign_response_unit_route(
     incident_id: int,
     assign_update: schemas.IncidentAssignUpdate,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Assign an available SAR response unit to an incident."""
@@ -159,10 +189,13 @@ def assign_response_unit_route(
 def dispatch_response_unit_route(
     incident_id: int,
     action: schemas.IncidentActionUpdate = None,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Dispatch the assigned response unit to the incident coordinates."""
     act = action or schemas.IncidentActionUpdate()
+    if not act.actor:
+        act.actor = current_user.full_name or current_user.username
     result, err = crud.dispatch_incident(db, incident_id=incident_id, action_update=act)
     if err:
         raise HTTPException(status_code=400 if "cannot" in err.lower() or "without" in err.lower() else 404, detail=err)
@@ -172,10 +205,13 @@ def dispatch_response_unit_route(
 def start_response_mission_route(
     incident_id: int,
     action: schemas.IncidentActionUpdate = None,
+    current_user: models.User = Depends(require_sar_or_field_lead),
     db: Session = Depends(get_db)
 ):
     """Mark response mission actively IN_PROGRESS on scene."""
     act = action or schemas.IncidentActionUpdate()
+    if not act.actor:
+        act.actor = current_user.full_name or current_user.username
     result, err = crud.start_incident_mission(db, incident_id=incident_id, action_update=act)
     if err:
         raise HTTPException(status_code=400 if "cannot" in err.lower() else 404, detail=err)
@@ -185,6 +221,7 @@ def start_response_mission_route(
 def resolve_incident_route(
     incident_id: int,
     resolve_update: schemas.IncidentResolveUpdate,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
     """Resolve incident with required operational resolution notes and release response unit."""
@@ -197,11 +234,14 @@ def resolve_incident_route(
 def cancel_incident_route(
     incident_id: int,
     action: schemas.IncidentActionUpdate = None,
+    current_user: models.User = Depends(require_sar_operator),
     db: Session = Depends(get_db)
 ):
-    """Cancel incident and release any assigned response unit."""
+    """Cancel an incident and release any assigned response unit back to AVAILABLE status."""
     act = action or schemas.IncidentActionUpdate()
+    if not act.actor:
+        act.actor = current_user.full_name or current_user.username
     result, err = crud.cancel_incident(db, incident_id=incident_id, action_update=act)
     if err:
-        raise HTTPException(status_code=400 if "already" in err.lower() else 404, detail=err)
+        raise HTTPException(status_code=400 if "cannot" in err.lower() else 404, detail=err)
     return result

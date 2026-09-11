@@ -230,7 +230,7 @@ function ResolveModal({ incident, onClose, onSubmit, isLoading }) {
 
 // ─── Incident Detail Drawer ─────────────────────────────────────────────────
 
-function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits }) {
+function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits, canManageSAR = true, canStartMission = true }) {
   const [detail, setDetail] = useState(null);
   const [history, setHistory] = useState([]);
   const [tab, setTab] = useState('overview');
@@ -390,7 +390,7 @@ function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits })
           {tab === 'units' && (
             <>
               {/* Assign unit */}
-              {!isTerminal && (
+              {!isTerminal && canManageSAR && (
                 <div>
                   <div className="drawer-section-title"><Send size={12} />Assign Response Unit</div>
                   <div className="assign-unit-select-list">
@@ -488,36 +488,38 @@ function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits })
         </div>
 
         {/* Action Bar */}
-        {!isTerminal && (
+        {!isTerminal && (canManageSAR || canStartMission) && (
           <div className="drawer-action-bar">
-            {detail?.status === 'REPORTED' && (
+            {canManageSAR && detail?.status === 'REPORTED' && (
               <button className="btn-sar btn-sar-acknowledge" onClick={handleAcknowledge} disabled={isActing}>
                 <Radio size={13} />Acknowledge
               </button>
             )}
-            {['REPORTED','ACKNOWLEDGED','TRIAGED'].includes(detail?.status) && (
+            {canManageSAR && ['REPORTED','ACKNOWLEDGED','TRIAGED'].includes(detail?.status) && (
               <button className="btn-sar btn-sar-triage" onClick={() => setModal('triage')} disabled={isActing}>
                 <Shield size={13} />Triage
               </button>
             )}
-            {detail?.assigned_unit_id && ['REPORTED','ACKNOWLEDGED','TRIAGED'].includes(detail?.status) && (
+            {canManageSAR && detail?.assigned_unit_id && ['REPORTED','ACKNOWLEDGED','TRIAGED'].includes(detail?.status) && (
               <button className="btn-sar btn-sar-dispatch" onClick={handleDispatch} disabled={isActing}>
                 <Send size={13} />Dispatch
               </button>
             )}
-            {detail?.status === 'DISPATCHED' && (
+            {canStartMission && detail?.status === 'DISPATCHED' && (
               <button className="btn-sar btn-sar-start" onClick={handleStart} disabled={isActing}>
                 <Activity size={13} />Start Mission
               </button>
             )}
-            {['REPORTED','ACKNOWLEDGED','TRIAGED','DISPATCHED','IN_PROGRESS'].includes(detail?.status) && (
+            {canManageSAR && ['REPORTED','ACKNOWLEDGED','TRIAGED','DISPATCHED','IN_PROGRESS'].includes(detail?.status) && (
               <button className="btn-sar btn-sar-resolve" onClick={() => setModal('resolve')} disabled={isActing}>
                 <CheckCircle2 size={13} />Resolve
               </button>
             )}
-            <button className="btn-sar btn-sar-cancel" onClick={handleCancel} disabled={isActing} style={{ marginLeft: 'auto' }}>
-              <X size={13} />Cancel
-            </button>
+            {canManageSAR && (
+              <button className="btn-sar btn-sar-cancel" onClick={handleCancel} disabled={isActing} style={{ marginLeft: 'auto' }}>
+                <X size={13} />Cancel
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -551,7 +553,12 @@ function IncidentDetailDrawer({ incidentId, onClose, onRefresh, responseUnits })
 
 // ─── Main EmergencyPage ──────────────────────────────────────────────────────
 
-export default function EmergencyPage({ onSelectAlert, onAlertStateChange }) {
+export default function EmergencyPage({ onSelectAlert, onAlertStateChange, currentUser }) {
+  const user = currentUser || api.getStoredUser() || {};
+  const userRole = (user.role || '').toUpperCase();
+  const canManageSAR = ['ADMIN', 'EXPEDITION_DIRECTOR', 'SAR_OFFICER'].includes(userRole);
+  const canStartMission = canManageSAR || userRole === 'FIELD_OPERATOR';
+
   const [incidents, setIncidents] = useState([]);
   const [stats, setStats] = useState(null);
   const [responseUnits, setResponseUnits] = useState([]);
@@ -831,6 +838,8 @@ export default function EmergencyPage({ onSelectAlert, onAlertStateChange }) {
       {selectedIncidentId && (
         <IncidentDetailDrawer
           incidentId={selectedIncidentId}
+          canManageSAR={canManageSAR}
+          canStartMission={canStartMission}
           onClose={() => setSelectedIncidentId(null)}
           onRefresh={() => {
             loadAll();

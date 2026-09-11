@@ -637,7 +637,12 @@ function AddPersonnelModal({ expeditions, onClose, onSuccess }) {
 // ============================================================
 // MAIN PAGE COMPONENT
 // ============================================================
-export default function PersonnelPage({ initialExpeditionId, initialPersonId }) {
+export default function PersonnelPage({ initialExpeditionId, initialPersonId, currentUser }) {
+  const user = currentUser || api.getStoredUser() || {};
+  const userRole = (user.role || '').toUpperCase();
+  const canAddPersonnel = ['ADMIN', 'EXPEDITION_DIRECTOR', 'EXPEDITION_LEADER'].includes(userRole);
+  const canUpdateLocation = ['ADMIN', 'EXPEDITION_DIRECTOR', 'EXPEDITION_LEADER', 'SAR_OFFICER', 'FIELD_OPERATOR'].includes(userRole);
+
   const [personnel, setPersonnel]     = useState([]);
   const [summary, setSummary]         = useState(null);
   const [expeditions, setExpeditions] = useState([]);
@@ -743,10 +748,12 @@ export default function PersonnelPage({ initialExpeditionId, initialPersonId }) 
             <RefreshCw size={14} className={isLoading ? 'radar-sweep-icon' : ''} style={{ display: 'inline', marginRight: 4 }} />
             Refresh
           </button>
-          <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-            <Plus size={14} style={{ display: 'inline', marginRight: 4 }} />
-            Add Personnel
-          </button>
+          {canAddPersonnel && (
+            <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+              <Plus size={14} style={{ display: 'inline', marginRight: 4 }} />
+              Add Personnel
+            </button>
+          )}
         </div>
       </div>
 
@@ -898,9 +905,11 @@ export default function PersonnelPage({ initialExpeditionId, initialPersonId }) 
                           <button className="prs-btn-view" onClick={() => setViewPersonId(p.id)} title="View details">
                             <Eye size={11} style={{ display: 'inline', marginRight: 3 }} /> View
                           </button>
-                          <button className="prs-btn-loc" onClick={() => setLocUpdatePerson(p)} title="Update location">
-                            <Navigation size={11} style={{ display: 'inline', marginRight: 3 }} /> Loc
-                          </button>
+                          {canUpdateLocation && (
+                            <button className="prs-btn-loc" onClick={() => setLocUpdatePerson(p)} title="Update location">
+                              <Navigation size={11} style={{ display: 'inline', marginRight: 3 }} /> Loc
+                            </button>
+                          )}
                           <button className="prs-btn-hist" onClick={() => setViewPersonId(p.id)} title="Movement history">
                             <History size={11} style={{ display: 'inline', marginRight: 3 }} /> History
                           </button>
